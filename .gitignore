@@ -2,3 +2,4 @@ libs/*
 venv/*
 out/*
 dataset/*
+__pycache__
