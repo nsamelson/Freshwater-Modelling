@@ -39,7 +39,7 @@ def main():
         ], 'content': ''}
     ], 'content': ''}
 
-    G = nx.MultiDiGraph()
+    G = nx.Graph()
     global uid
     uid = 0
     
