@@ -2,6 +2,9 @@ import math
 import xml.etree.ElementTree as ET
 import networkx as nx
 import matplotlib.pyplot as plt
+from torch_geometric.utils.convert import to_networkx, from_networkx
+import torch
+
 
 def main():
     """
@@ -13,50 +16,29 @@ def main():
     root = tree.getroot()
 
     
-    base =  {'type': 'math', 'children': [
-        {'type': 'mrow', 'children': [
-            {'type': 'msup', 'children': [
-                {'type': 'mi', 'content': 'A', 'attributes': []}, 
-                {'type': 'mn', 'content': '2', 'attributes': []}
+    base =  {'type': 'math', 'children': [                                  #0
+        {'type': 'mrow', 'children': [                                      #1
+            {'type': 'msup', 'children': [                                  #2
+                {'type': 'mi', 'content': 'A', 'attributes': []},           #3
+                {'type': 'mn', 'content': '2', 'attributes': []}            #4
             ], 'content': ''}, 
-            {'type': 'mo', 'content': '+', 'attributes': []}
+            {'type': 'mo', 'content': '+', 'attributes': []}                #5
         ], 'content': ''}, 
-        {'type': 'mrow', 'children': [
-            {'type': 'msup', 'children': [
-                {'type': 'mi', 'content': 'B', 'attributes': []}, 
-                {'type': 'mn', 'content': '2', 'attributes': []}
+        {'type': 'mrow', 'children': [                                      #6
+            {'type': 'msup', 'children': [                                  #7
+                {'type': 'mi', 'content': 'B', 'attributes': []},           #8
+                {'type': 'mn', 'content': '2', 'attributes': []}            #9
             ], 'content': ''}, 
-            {'type': 'mo', 'content': '=', 'attributes': []}
+            {'type': 'mo', 'content': '=', 'attributes': []}                #10
         ], 'content': ''}, 
-        {'type': 'mrow', 'children': [
-            {'type': 'msup', 'children': [
-                {'type': 'mi', 'content': 'C', 'attributes': []}, 
-                {'type': 'mn', 'content': '2', 'attributes': []}
+        {'type': 'mrow', 'children': [                                      #11
+            {'type': 'msup', 'children': [                                  #12
+                {'type': 'mi', 'content': 'C', 'attributes': []},           #13
+                {'type': 'mn', 'content': '2', 'attributes': []}            #14
             ], 'content': ''}
         ], 'content': ''}
     ], 'content': ''}
 
-    
-    # def process(d):
-    #     """Convert XML-Structure to Python dict-based representation"""
-    #     children = [x for x in d]
-    #     if children:
-    #         children = []
-    #         for x in d:
-    #             tag = rn(x.tag)
-    #             if tag == "annotation":
-    #                 #skip the latex annotation
-    #                 continue
-    #             children.append(process(x))
-    #         return dict(type=rn(d.tag),
-    #                     children=children,
-    #                     content="" if d.text is None else d.text)
-    #     return dict(type=rn(d.tag),
-    #                 content="" if d.text is None else d.text)
-    
-    # graph = process(root)
-    # print(graph)
-    # Initialize a directed graph and a global variable 'uid'
     G = nx.MultiDiGraph()
     global uid
     uid = 0
@@ -72,6 +54,9 @@ def main():
 
         for child in element:
             tag = rn(child.tag)
+            if tag == "annotation":
+                #skip the latex annotation
+                continue
 
             G.add_node(uid, tag=tag, label=child.text)
             G.add_edge(parent_uid, uid)
@@ -85,6 +70,10 @@ def main():
 
     # Create graph nodes and edges
     create_node(root)
+    # nx.write_graphml_xml(G,"out/graph.graphml")
+    #TODO: one-hot encode
+    #TODO: save the graphs in a format, mumpy array for ex.
+    # print(nx.to_numpy_array(G))
 
     # Print graph nodes and edges
     print("Nodes:", G.nodes(data=True))
@@ -93,9 +82,11 @@ def main():
     # Draw the graph using NetworkX's built-in drawing functions
     pos = nx.spring_layout(G,k = 1/math.sqrt(len(G.nodes.values())))  # Compute graph layout
 
+    labels = {n: lab["tag"]+"_"+lab["label"] if lab["label"] else lab["tag"] for n,lab in G.nodes(data=True)}
+
     nx.draw_networkx_nodes(G, pos=pos, node_size=500, node_color='lightblue')
     nx.draw_networkx_edges(G, pos=pos, width=1.0, alpha=0.5)
-    nx.draw_networkx_labels(G, pos=pos, font_size=10, font_family='sans-serif')
+    nx.draw_networkx_labels(G, pos=pos, labels=labels,font_size=10, font_family='sans-serif')
 
     plt.axis('off')
 
@@ -103,8 +94,14 @@ def main():
     plt.title('MathML Structure Graph')
     plt.savefig('out/graph.jpg', format='jpeg', dpi=300) 
 
+    # TODO: figure out how to transform and use it to train on pytorch
+    pyg_graph = from_networkx(G)
+    print(pyg_graph)
+    print(pyg_graph.edge_index)
+    print(pyg_graph.tag)
+    print(pyg_graph.label)
 
-    # pyg_graph = from_networkx(G)
+
 
 
 

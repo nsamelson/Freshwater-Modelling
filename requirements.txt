@@ -3,3 +3,5 @@ datasets==2.19.1
 latex2mathml==3.77.0
 matplotlib==3.8.4
 networkx==3.3
+torch==2.3.0
+torch_geometric==2.5.3
