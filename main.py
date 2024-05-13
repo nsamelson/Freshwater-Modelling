@@ -1,7 +1,7 @@
 
 import argparse
-import tex2xml
-import xml2graph
+import preprocessing.tex2xml as tex2xml
+import preprocessing.xml2graph as xml2graph
 
 
 if __name__=="__main__":
