@@ -1,10 +1,14 @@
+import json
 import math
+import re
 import xml.etree.ElementTree as ET
 import networkx as nx
 import matplotlib.pyplot as plt
 from torch_geometric.utils.convert import to_networkx, from_networkx
 from torch_geometric.data import DataLoader
 from tqdm import tqdm
+from stats.plot_labels import plot_labels_frequency
+from utils import save
 # import torch_geometric.nn as pyg_nn
 # import torch_geometric.utils as pyg_utils 
 # import torch_geometric.transforms as T
@@ -14,22 +18,45 @@ from tqdm import tqdm
 
 
 
-def main():
+def main(generate_stats=True):
     """
     Generate a graph from mathml XML equations. 
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
     """
+    
     # Load the MathML equation 
-    tree = ET.parse('out/test.xml')
-    # tree = ET.parse('dataset/equations.xml')
+    # tree = ET.parse('out/test.xml')
+    tree = ET.parse('dataset/equations.xml')
     root = tree.getroot()
+
+    xml_tags = {}
+    xml_labels = {}
+
 
     # Iterate through each XML equation and create a graph
     for i, formula in enumerate(tqdm(root,desc="Generating Graphs",unit="equations")):
         G = build_graph(formula)
 
-        # print("Nodes:", G.nodes(data=True))
-        # print("Edges:", G.edges())
+        if generate_stats:
+            # get the tags out of the graph and add to the dict
+            for _, tag in G.nodes(data="tag"):
+                xml_tags[tag] = xml_tags.get(tag, 0) + 1            
+            
+
+            # get the labels out of the graph and add to the dict
+            for _, label in G.nodes(data="label"):
+                xml_labels[label] = xml_labels.get(label, 0) + 1    
+
+    if generate_stats:    
+        print("Number of different tags: ", len(xml_tags.keys()))
+        print("Number of different labels: ",len(xml_labels.keys()))
+
+        # save into json
+        save.json_dump("out/xml_tags_count.json",xml_tags)
+        save.json_dump("out/xml_labels_count.json",xml_labels)
+
+        plot_labels_frequency()
+
 
 
 
@@ -69,6 +96,8 @@ def main():
     # print(pyg_graph.label)
 
 
+
+
 def build_graph(xml_root):
     """
     Build a graph from equation in MathML format.
@@ -92,7 +121,7 @@ def build_graph(xml_root):
             if tag == "annotation":
                 #skip the latex annotation
                 continue
-            
+
             # Add new node and edge between himself and the parent
             G.add_node(uid, tag=tag, label=child.text)
             G.add_edge(parent_uid, uid)
