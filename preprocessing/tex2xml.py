@@ -2,9 +2,6 @@ import re
 from datasets import load_dataset
 from latex2mathml import converter
 import xml.etree.ElementTree as ET
-from PIL import Image
-import networkx as nx
-import matplotlib.pyplot as plt
 from latex2mathml.exceptions import InvalidAlignmentError, DoubleSuperscriptsError, DenominatorNotFoundError
 from tqdm import tqdm
 
@@ -43,17 +40,22 @@ EXCLUDED_COMMANDS = [
     r"\\mathbb\b"  # \mathbb
 ]
 
-def main(debug=True):
+def main(debug=False, select_raw=False):
     """
     Download Tex equations, convert to XML and save into XML dataset.
     Dataset of formulas : https://huggingface.co/datasets/OleehyO/latex-formulas
-    Page info: "We scraped approximately 1 million LaTeX formula image-text pairs from arxiv that were uncleaned and without 
+    ### Page info: 
+    "We scraped approximately 1 million LaTeX formula image-text pairs from arxiv that were uncleaned and without 
     text segmentation to create the raw_formulas dataset. After cleaning the raw_formulas dataset and integrating 
     it with the im2latex-100K dataset, we obtained the cleaned_formulas dataset, which has 550K formula-image pairs."
+    ### Parameters:
+    - debug (Bool): Set to True to run in debug mode
+    - select_raw (Bool): Set to True to run the full ```raw_formulas``` set
     """
-    # data = load_dataset("OleehyO/latex-formulas", "raw_formulas",trust_remote_code=True) 
-    data = load_dataset("OleehyO/latex-formulas", "cleaned_formulas",trust_remote_code=True) 
 
+    data = load_dataset("OleehyO/latex-formulas", "cleaned_formulas",trust_remote_code=True) 
+    if select_raw:
+        data = load_dataset("OleehyO/latex-formulas", "raw_formulas",trust_remote_code=True) 
     conversion_stats = {
         "success":0,
         "unsupported":0,
@@ -78,13 +80,10 @@ def main(debug=True):
         try:
             # Clean formula
             latex_formula = remove_commands(latex_formula)
-            # print(latex_formula)
 
             # Convert to MathML
             mathml_element = converter.convert_to_element(latex_formula)
             mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
-
-
 
             if '\\' in mathml_string or '\\\\' in mathml_string:
                 conversion_stats["unsupported"] += 1
@@ -107,8 +106,6 @@ def main(debug=True):
         except Exception as e:
             # Handle other exceptions
             conversion_stats["dunno"] += 1
-            # print(e)
-
     
     print(f"The latex formulas were converted, here are the stats : {conversion_stats}")
 
@@ -116,10 +113,14 @@ def main(debug=True):
     tree.write("dataset/equations.xml", encoding="utf-8", xml_declaration=True)
 
 
-
-
 def remove_commands(text):
-
+    """
+    Go through the Tex equation and remove any pattern flagged in ```EXCLUDED_COMMANDS```.
+    ### Parameters:
+    text (string): input Latex equation
+    ### Returns:
+    - text (string): output Latex equation
+    """
     # Construct a regular expression pattern to match any of the specified commands
     pattern = '|'.join(EXCLUDED_COMMANDS)
 
