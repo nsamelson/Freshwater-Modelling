@@ -1,9 +1,13 @@
+from collections import defaultdict
 import re
 from datasets import load_dataset
 from latex2mathml import converter
 import xml.etree.ElementTree as ET
 from latex2mathml.exceptions import InvalidAlignmentError, DoubleSuperscriptsError, DenominatorNotFoundError
 from tqdm import tqdm
+from utils import save
+from utils import plot
+
 
 EXCLUDED_COMMANDS = [
     r"\\begin{align\*?}", r"\\end{align\*?}",  # align and align*
@@ -40,6 +44,40 @@ EXCLUDED_COMMANDS = [
     r"\\mathbb\b"  # \mathbb
 ]
 
+MATHML_TAGS = [
+    "maction",
+    "math",
+    "menclose",
+    "merror", 
+    "mfenced",
+    "mfrac", 
+    "mglyph", 
+    "mi", 	
+    "mlabeledtr", 
+    "mmultiscripts", 
+    "mn",
+    "mo",
+    "mover", 	
+    "mpadded", 	
+    "mphantom", 	
+    "mroot", 	
+    "mrow", 
+    "ms", 	
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",  
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
+    "munderover",
+    "semantics", 
+]
+
 def main(debug=False, select_raw=False):
     """
     Download Tex equations, convert to XML and save into XML dataset.
@@ -65,6 +103,14 @@ def main(debug=False, select_raw=False):
         "dunno":0,
     }
 
+    # # Dictionaries to keep track of counts
+    # tag_counts = defaultdict(int)
+    # text_counts = defaultdict(int)
+
+    # # Regular expression patterns
+    # tag_pattern = re.compile(r'</?([a-zA-Z0-9]+)[^>]*>')
+    # text_pattern = re.compile(r'>([^<]+)<')
+
     # Initialize a string to store all XML documents
     root = ET.Element("formulas")
 
@@ -73,7 +119,7 @@ def main(debug=False, select_raw=False):
         latex_formula = formula["latex_formula"]
 
         if debug:
-            if i >=100:
+            if i >=50000:
                 break
 
         # Convert LaTeX formula to MathML
@@ -83,13 +129,30 @@ def main(debug=False, select_raw=False):
 
             # Convert to MathML
             mathml_element = converter.convert_to_element(latex_formula)
-            mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
+            # mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
+            mathml_string = converter.convert(latex_formula)
 
             if '\\' in mathml_string or '\\\\' in mathml_string:
                 conversion_stats["unsupported"] += 1
                 continue
             else:
                 conversion_stats["success"] += 1
+
+            # # Find all tags
+            # tags = tag_pattern.findall(mathml_string)
+            # for tag in tags:
+            #     if tag in MATHML_TAGS:
+            #         tag_counts[tag] += 1
+            #     else:
+            #         print(tag, latex_formula)
+            
+            # # Remove tags to get the text content
+            # text_segments = tag_pattern.split(mathml_string)
+            # for i, segment in enumerate(text_segments):
+            #     if i % 2 == 0:  # Even indices contain text content
+            #         cleaned_text = re.sub(r'\s+', ' ', segment.strip())  # Clean up whitespace
+            #         if cleaned_text:
+            #             text_counts[cleaned_text] += 1
 
             # Append equation to big xml
             root.append(mathml_element)
@@ -107,10 +170,19 @@ def main(debug=False, select_raw=False):
             # Handle other exceptions
             conversion_stats["dunno"] += 1
     
+    
     print(f"The latex formulas were converted, here are the stats : {conversion_stats}")
+    # print("Number of different tags: ", len(tag_counts.keys()))
+    # print("Number of different labels: ",len(text_counts.keys()))
 
+    # Save dataset
     tree = ET.ElementTree(root)
     tree.write("dataset/equations.xml", encoding="utf-8", xml_declaration=True)
+
+    # # Save stats
+    # save.json_dump("out/tags_count.json",tag_counts)
+    # save.json_dump("out/labels_count.json",text_counts)
+    # plot.plot_labels_frequency()
 
 
 def remove_commands(text):
