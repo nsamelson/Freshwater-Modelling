@@ -3,12 +3,11 @@ import math
 import re
 import xml.etree.ElementTree as ET
 import networkx as nx
-import matplotlib.pyplot as plt
 from torch_geometric.utils.convert import to_networkx, from_networkx
 from torch_geometric.data import DataLoader
 from tqdm import tqdm
-from stats.plot_labels import plot_labels_frequency
-from utils import save
+# from utils.plot import plot_labels_frequency
+from utils import save, stats, plot
 # import torch_geometric.nn as pyg_nn
 # import torch_geometric.utils as pyg_utils 
 # import torch_geometric.transforms as T
@@ -16,48 +15,66 @@ from utils import save
 # from tensorboardX import SummaryWriter
 # from sklearn.manifold import TSNE
 
+MATHML_TAGS = [
+    "maction",
+    "math",
+    "menclose",
+    "merror", 
+    "mfenced",
+    "mfrac", 
+    "mglyph", 
+    "mi", 	
+    "mlabeledtr", 
+    "mmultiscripts", 
+    "mn",
+    "mo",
+    "mover", 	
+    "mpadded", 	
+    "mphantom", 	
+    "mroot", 	
+    "mrow", 
+    "ms", 	
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",  
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
+    "munderover",
+    "semantics", 
+]
 
-
-def main(generate_stats=True):
+def main(generate_stats=False, debug=True):
     """
     Generate a graph from mathml XML equations. 
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
     """
     
+
     # Load the MathML equation 
     # tree = ET.parse('out/test.xml')
-    tree = ET.parse('dataset/equations.xml')
+    tree = ET.parse('dataset/cleaned_formulas.xml')
     root = tree.getroot()
 
-    xml_tags = {}
-    xml_labels = {}
+
+    graphs_dataset = []
+
 
 
     # Iterate through each XML equation and create a graph
     for i, formula in enumerate(tqdm(root,desc="Generating Graphs",unit="equations")):
+
+        if debug and i >= 10:
+            break
+        
+        # Build graph and add to list
         G = build_graph(formula)
-
-        if generate_stats:
-            # get the tags out of the graph and add to the dict
-            for _, tag in G.nodes(data="tag"):
-                xml_tags[tag] = xml_tags.get(tag, 0) + 1            
-            
-
-            # get the labels out of the graph and add to the dict
-            for _, label in G.nodes(data="label"):
-                xml_labels[label] = xml_labels.get(label, 0) + 1    
-
-    if generate_stats:    
-        print("Number of different tags: ", len(xml_tags.keys()))
-        print("Number of different labels: ",len(xml_labels.keys()))
-
-        # save into json
-        save.json_dump("out/xml_tags_count.json",xml_tags)
-        save.json_dump("out/xml_labels_count.json",xml_labels)
-
-        plot_labels_frequency()
-
-
+        graphs_dataset.append(G)
 
 
     # graphs = [build_graph(x) for x in root]
@@ -73,27 +90,16 @@ def main(generate_stats=True):
         # Print graph nodes and edges
         
 
-    # Draw the graph using NetworkX's built-in drawing functions
-    # pos = nx.spring_layout(G)  # Compute graph layout
+   
 
-    # labels = {n: lab["label"] if lab["label"] else lab["tag"] for n,lab in G.nodes(data=True)}
+    # TODO: figure out how to transform and use it to train on pytorch
+    pyg_graph = from_networkx(graphs_dataset[0])
+    print(pyg_graph)
+    print(pyg_graph.edge_index)
+    print(pyg_graph.tag)
+    print(pyg_graph.label)
 
-    # nx.draw_networkx_nodes(G, pos=pos, node_size=500, node_color='lightblue')
-    # nx.draw_networkx_edges(G, pos=pos, width=1.0, alpha=0.5)
-    # nx.draw_networkx_labels(G, pos=pos, labels=labels,font_size=10, font_family='sans-serif')
 
-    # plt.axis('off')
-
-    # # Show the graph
-    # plt.title('MathML Structure Graph')
-    # plt.savefig(f'out/{i}_graph.jpg', format='jpeg', dpi=300) 
-
-    # # TODO: figure out how to transform and use it to train on pytorch
-    # pyg_graph = from_networkx(G)
-    # print(pyg_graph)
-    # print(pyg_graph.edge_index)
-    # print(pyg_graph.tag)
-    # print(pyg_graph.label)
 
 
 
@@ -110,7 +116,7 @@ def build_graph(xml_root):
     def create_node(element,parent_uid=0):
         global uid
 
-        # Adding parent node "Math"
+        # Adding parent node "math"
         if len(G.nodes) == 0:
             G.add_node(0,tag=rn(element.tag),label=element.text) # set parent node: math with uid=0
             uid = 1                                              # start new nodes from uid=1
