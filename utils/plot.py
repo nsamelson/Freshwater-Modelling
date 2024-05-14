@@ -1,12 +1,13 @@
 import json
 from matplotlib import pyplot as plt
+import networkx as nx
 
 
 def plot_labels_frequency():
-    with open("out/xml_labels_count.json",mode="r") as f:
+    with open("out/labels_count.json",mode="r") as f:
         labels_count = json.load(f)
     
-    with open("out/xml_tags_count.json",mode="r") as f:
+    with open("out/tags_count.json",mode="r") as f:
         tags_count = json.load(f)
 
     # Sort labels based on their frequency
@@ -41,3 +42,21 @@ def plot_labels_frequency():
 
     plt.tight_layout()
     plt.savefig('out/label_freqs.jpg', format='jpg',dpi=300)
+
+
+def plot_graph(G):
+    # Draw the graph using NetworkX's built-in drawing functions
+    plt.figure()
+    pos = nx.spring_layout(G)  # Compute graph layout
+
+    labels = {n: lab["label"] if lab["label"] else lab["tag"] for n,lab in G.nodes(data=True)}
+
+    nx.draw_networkx_nodes(G, pos=pos, node_size=500, node_color='lightblue')
+    nx.draw_networkx_edges(G, pos=pos, width=1.0, alpha=0.5)
+    nx.draw_networkx_labels(G, pos=pos, labels=labels,font_size=10, font_family='sans-serif')
+
+    plt.axis('off')
+
+    # Show the graph
+    plt.title('MathML Structure Graph')
+    plt.savefig(f'out/{i}_graph.jpg', format='jpeg', dpi=300) 

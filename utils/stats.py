@@ -6,39 +6,7 @@ import xml.etree.ElementTree as ET
 from tqdm import tqdm
 from utils import save, plot
 
-MATHML_TAGS = [
-    "maction",
-    "math",
-    "menclose",
-    "merror", 
-    "mfenced",
-    "mfrac", 
-    "mglyph", 
-    "mi", 	
-    "mlabeledtr", 
-    "mmultiscripts", 
-    "mn",
-    "mo",
-    "mover", 	
-    "mpadded", 	
-    "mphantom", 	
-    "mroot", 	
-    "mrow", 
-    "ms", 	
-    "mspace",
-    "msqrt",
-    "mstyle",
-    "msub",
-    "msubsup",  
-    "msup",
-    "mtable",
-    "mtd",
-    "mtext",
-    "mtr",
-    "munder",
-    "munderover",
-    "semantics", 
-]
+
 
 def xml_occurences(xml_path="dataset/cleaned_formulas.xml", debug=False):
     tree = ET.parse(xml_path)
