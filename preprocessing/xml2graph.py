@@ -4,7 +4,7 @@ import re
 import xml.etree.ElementTree as ET
 import networkx as nx
 from torch_geometric.utils.convert import to_networkx, from_networkx
-from torch_geometric.data import DataLoader
+from torch_geometric.data import DataLoader, Data
 from tqdm import tqdm
 # from utils.plot import plot_labels_frequency
 from utils import save, stats, plot
@@ -57,13 +57,11 @@ def main(generate_stats=False, debug=True):
     
 
     # Load the MathML equation 
-    # tree = ET.parse('out/test.xml')
-    tree = ET.parse('dataset/cleaned_formulas.xml')
+    tree = ET.parse('out/test.xml')
+    # tree = ET.parse('dataset/cleaned_formulas.xml')
     root = tree.getroot()
 
-
-    graphs_dataset = []
-
+    graphs = []
 
 
     # Iterate through each XML equation and create a graph
@@ -74,31 +72,29 @@ def main(generate_stats=False, debug=True):
         
         # Build graph and add to list
         G = build_graph(formula)
-        graphs_dataset.append(G)
+        graphs.append(G)
 
-
-    # graphs = [build_graph(x) for x in root]
-
-
-    # nx.write_graphml_xml(G,"out/graph.graphml")
-    #TODO: one-hot encode
-    #TODO: save the graphs in a format, mumpy array for ex.
-    # print(nx.to_numpy_array(G))
-
-    # for i,G in enumerate(graphs):
-
-        # Print graph nodes and edges
+    G = graphs[0]
+    # nx.write_weighted_edgelist(G,"out/graph.txt")
+    print(G)
+    print(G.nodes(data=True))
+    print(G.edges())
         
-
+    # TODO: DO I NEED TO ENCODE?
+    # CHATGPT : In PyTorch Geometric (PyG), node features are typically numerical values stored in a tensor.One common approach is to use encoding techniques such as one-hot encoding, label encoding, or even embedding vectors.
+    #   - Label Encoding for tag: Assign a unique integer to each unique tag.
+    #   - Text Encoding for text: Depending on the nature of the text, you could use methods like TF-IDF, word embeddings (e.g., Word2Vec, GloVe), or more complex models like BERT to generate numerical representations.
    
 
     # TODO: figure out how to transform and use it to train on pytorch
-    pyg_graph = from_networkx(graphs_dataset[0])
-    print(pyg_graph)
+    pyg_graph = from_networkx(graphs[0]) 
+    print(pyg_graph.x)
     print(pyg_graph.edge_index)
     print(pyg_graph.tag)
-    print(pyg_graph.label)
+    print(pyg_graph.text)
 
+    # TODO: to save dataset
+    # torch.save(data, 'graph_data.pt')
 
 
 
@@ -118,7 +114,9 @@ def build_graph(xml_root):
 
         # Adding parent node "math"
         if len(G.nodes) == 0:
-            G.add_node(0,tag=rn(element.tag),label=element.text) # set parent node: math with uid=0
+            tag = rn(element.tag)
+            # G.add_node(0,x=tag,tag=tag,text=element.text)
+            G.add_node(0,tag=tag,text=element.text) # set parent node: math with uid=0
             uid = 1                                              # start new nodes from uid=1
 
         # Go through each child
@@ -129,7 +127,7 @@ def build_graph(xml_root):
                 continue
 
             # Add new node and edge between himself and the parent
-            G.add_node(uid, tag=tag, label=child.text)
+            G.add_node(uid, x=tag, tag=tag, text=child.text)
             G.add_edge(parent_uid, uid)
             uid += 1
 

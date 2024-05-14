@@ -49,11 +49,13 @@ def main(debug=False, select_raw=False):
     """
     Download Tex equations, convert to XML and save into XML dataset.
     Dataset of formulas : https://huggingface.co/datasets/OleehyO/latex-formulas
-    ### Page info: 
+    
+    Page info: 
     "We scraped approximately 1 million LaTeX formula image-text pairs from arxiv that were uncleaned and without 
     text segmentation to create the raw_formulas dataset. After cleaning the raw_formulas dataset and integrating 
     it with the im2latex-100K dataset, we obtained the cleaned_formulas dataset, which has 550K formula-image pairs."
-    ### Parameters:
+    
+    Args:
     - debug (Bool): Set to True to run in debug mode
     - select_raw (Bool): Set to True to run the full ```raw_formulas``` set
     """
@@ -124,9 +126,11 @@ def main(debug=False, select_raw=False):
 def remove_commands(text):
     """
     Go through the Tex equation and remove any pattern flagged in ```EXCLUDED_COMMANDS```.
-    ### Parameters:
-    text (string): input Latex equation
-    ### Returns:
+    
+    Args:
+    - text (string): input Latex equation
+    
+    Returns:
     - text (string): output Latex equation
     """
     # Construct a regular expression pattern to match any of the specified commands
