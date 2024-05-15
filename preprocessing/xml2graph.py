@@ -1,6 +1,8 @@
+import html
 import json
 import math
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 import networkx as nx
 from torch_geometric.utils.convert import to_networkx, from_networkx
@@ -55,6 +57,8 @@ def main(generate_stats=False, debug=True):
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
     """
     
+    create_embedding_tables()
+    return
 
     # Load the MathML equation 
     tree = ET.parse('out/test.xml')
@@ -72,6 +76,8 @@ def main(generate_stats=False, debug=True):
         
         # Build graph and add to list
         G = build_graph(formula)
+        if i <= 10:
+            plot.plot_graph(G,f"{i}_graph")
         graphs.append(G)
 
     G = graphs[0]
@@ -87,7 +93,7 @@ def main(generate_stats=False, debug=True):
    
 
     # TODO: figure out how to transform and use it to train on pytorch
-    pyg_graph = from_networkx(graphs[0]) 
+    pyg_graph = from_networkx(graphs[-1]) 
     print(pyg_graph.x)
     print(pyg_graph.edge_index)
     print(pyg_graph.tag)
@@ -107,27 +113,27 @@ def build_graph(xml_root):
     """
     G = nx.Graph()
 
-    
-
     def create_node(element,parent_uid=0):
         global uid
 
         # Adding parent node "math"
         if len(G.nodes) == 0:
             tag = rn(element.tag)
+            text = "" if element.text is None else element.text
             # G.add_node(0,x=tag,tag=tag,text=element.text)
-            G.add_node(0,tag=tag,text=element.text) # set parent node: math with uid=0
+            G.add_node(0,tag=tag,text=text) # set parent node: math with uid=0
             uid = 1                                              # start new nodes from uid=1
 
         # Go through each child
         for child in element:
             tag = rn(child.tag)
+            text = "" if child.text is None else child.text
             if tag == "annotation":
                 #skip the latex annotation
                 continue
 
             # Add new node and edge between himself and the parent
-            G.add_node(uid, x=tag, tag=tag, text=child.text)
+            G.add_node(uid, tag=tag, text=text)
             G.add_edge(parent_uid, uid)
             uid += 1
 
@@ -139,6 +145,71 @@ def build_graph(xml_root):
     create_node(xml_root,0)
     return G
 
+
+def create_embedding_tables(xml_path="dataset/cleaned_formulas.xml", debug=False):
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    embedding_table = {tag:set() for tag in MATHML_TAGS}
+
+    bad_things = {"numbers":0}
+
+    def find_in_element(element):    
+        
+        if "math" in element.tag:
+            tag = rn(element.tag)
+            text = "" if element.text is None else clean_text(element.text)
+            embedding_table[tag].add(text)
+
+
+        for child in element:
+            tag = rn(child.tag)
+            text = "" if child.text is None else clean_text(child.text)
+
+            if tag=="mn":
+                try:
+                    number = float(text)
+                except:
+                    bad_things["numbers"] +=1
+
+            if tag=="mtext":
+                [embedding_table[tag].add(word) for word in text.split()]
+            else:
+                embedding_table[tag].add(text)
+            children = [x for x in child]
+            if children:
+                find_in_element(child)
+    
+    # iterate over each XML equation
+    for i, formula in enumerate(tqdm(root,desc="Counting occurences",unit="equations")):
+        if debug and i>= 10000:
+            break
+
+        # Run recursive function
+        find_in_element(formula)
+    
+    for tag,values in embedding_table.items():
+        if len(values) > 1:
+            print(f"{tag} : {len(values)} - examples : {list(values)[0:5] if len(values)>5 else list(values)}")
+    print(bad_things)
+    
+    # Trasform to dict of lists then save it
+    texts_per_tag = {key: list(value) for key,value in embedding_table.items()}
+    save.json_dump("out/text_per_tag.json",texts_per_tag)
+        
+
+def decode_xml_entities(text):
+    return html.unescape(text)
+
+def normalize_unicode(text):
+    return unicodedata.normalize('NFKC', text)
+
+def clean_text(text):
+    text = decode_xml_entities(text)
+    # text = normalize_unicode(text) # Maybe not?
+
+    text = text.replace('\u00a0',' ').strip()
+    return text
 
 def rn(x):
     """Remove Namespace"""

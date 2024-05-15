@@ -92,6 +92,8 @@ def main(debug=False, select_raw=False):
             mathml_element = converter.convert_to_element(latex_formula)
             # mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
             mathml_string = converter.convert(latex_formula)
+            if "1mm" in mathml_string:
+                print(latex_formula, mathml_string)
 
             if '\\' in mathml_string or '\\\\' in mathml_string:
                 conversion_stats["unsupported"] += 1
