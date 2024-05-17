@@ -57,11 +57,11 @@ def main(generate_stats=False, debug=True):
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
     """
     
-    create_embedding_tables()
-    return
+    # create_embedding_tables()
+    # return
 
     # Load the MathML equation 
-    tree = ET.parse('out/test.xml')
+    tree = ET.parse('dataset/test.xml')
     # tree = ET.parse('dataset/cleaned_formulas.xml')
     root = tree.getroot()
 
