@@ -57,11 +57,13 @@ def main(generate_stats=False, debug=True):
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
     """
     
-    # create_embedding_tables()
-    # return
+    # create_embedding_tables('dataset/cleaned_formulas.xml')
+    stats.xml_occurences('dataset/cleaned_formulas_katex.xml')
+    plot.plot_text_frequency_per_tag("out/text_per_tag_katex.json")
+    return
 
     # Load the MathML equation 
-    tree = ET.parse('dataset/test.xml')
+    tree = ET.parse('dataset/equations.xml')
     # tree = ET.parse('dataset/cleaned_formulas.xml')
     root = tree.getroot()
 
@@ -172,10 +174,11 @@ def create_embedding_tables(xml_path="dataset/cleaned_formulas.xml", debug=False
                 except:
                     bad_things["numbers"] +=1
 
-            if tag=="mtext":
-                [embedding_table[tag].add(word) for word in text.split()]
-            else:
-                embedding_table[tag].add(text)
+            embedding_table[tag].add(text)
+            # if tag=="mtext":
+            #     [embedding_table[tag].add(word) for word in text.split()]
+            # else:
+            #     embedding_table[tag].add(text)
             children = [x for x in child]
             if children:
                 find_in_element(child)
