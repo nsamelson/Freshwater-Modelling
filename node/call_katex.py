@@ -2,10 +2,12 @@ import os
 import json
 import subprocess
 import logging
+import xml.etree.ElementTree as ET
+from datasets import load_dataset
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
-def call_js(latex_equations, paper_id=""):
+def call_js(latex_equation, paper_id=""):
     try:
         p, _ = os.path.split(__file__)
         script_path = os.path.join(p, "tex2mathml_simple.js")
@@ -19,7 +21,7 @@ def call_js(latex_equations, paper_id=""):
 
         result = subprocess.run(
             [script_path],
-            input=json.dumps(latex_equations),
+            input=json.dumps(latex_equation),
             cwd=os.path.join(p),
             env=env,
             universal_newlines=True,
@@ -55,6 +57,8 @@ def call_js(latex_equations, paper_id=""):
 
 if __name__ == "__main__":
     # Example usage of call_js
-    latex_equations = ["f(x) = x^2", "a^2 = 3"]
-    result = call_js(latex_equations)
-    print(result)
+    equations = ["f(x) = x^2", "A=2"]
+    for equation in equations:
+        result = call_js(equation)
+        print(result)
+    # pass

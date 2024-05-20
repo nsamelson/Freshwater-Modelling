@@ -7,7 +7,10 @@ from latex2mathml.exceptions import InvalidAlignmentError, DoubleSuperscriptsErr
 from tqdm import tqdm
 from utils import save
 from utils import plot
-
+import subprocess
+import os
+import logging
+import json
 
 EXCLUDED_COMMANDS = [
     r"\\begin{align\*?}", r"\\end{align\*?}",  # align and align*
@@ -45,7 +48,7 @@ EXCLUDED_COMMANDS = [
 ]
 
 
-def main(debug=False, select_raw=False):
+def main(debug=False, select_raw=False,batch_size=1000):
     """
     Download Tex equations, convert to XML and save into XML dataset.
     Dataset of formulas : https://huggingface.co/datasets/OleehyO/latex-formulas
@@ -65,57 +68,89 @@ def main(debug=False, select_raw=False):
         data = load_dataset("OleehyO/latex-formulas", "raw_formulas",trust_remote_code=True) 
     conversion_stats = {
         "success":0,
-        "unsupported":0,
-        "align":0,
-        "superscript":0,
-        "denominator":0,
-        "dunno":0,
+        "error": 0,
+        "TypeError":0,
+        "NoneType":0
+        # "unsupported":0,
+        # "align":0,
+        # "superscript":0,
+        # "denominator":0,
+        # "dunno":0,
     }
 
-    # Initialize a string to store all XML documents
-    root = ET.Element("formulas")
+    # Create the root element with the <span class="katex"> tag
+    ET.register_namespace('', 'http://www.w3.org/1998/Math/MathML')
+    root = ET.Element("span", attrib={"class": "katex"})
+
+    all_equations = [formula["latex_formula"] for formula in data["train"]]
 
     # Iterate over all equations in the dataset
-    for i, formula in enumerate(tqdm(data["train"], desc="Generating XML",unit="equations")):
-        latex_formula = formula["latex_formula"]
+    for i,batch in enumerate(tqdm(process_equations_in_batches(all_equations, batch_size), desc="Processing batches",unit="batch")):
 
         if debug:
-            if i >=50000:
+            if i >=5:
                 break
+        
+        # Clean formula
+        cleaned_batch = [remove_commands(formula) for formula in batch]
 
-        # Convert LaTeX formula to MathML
-        try:
-            # Clean formula
-            latex_formula = remove_commands(latex_formula)
+        # Convert to mathml
+        mathml_results = call_js(cleaned_batch)
+        
+        if mathml_results:
+            for mathml_string in mathml_results:
+                try:
+                    # Parse the MathML string into an ElementTree element
+                    span_element = ET.fromstring(mathml_string)
+                    mathml_element = span_element.find("{http://www.w3.org/1998/Math/MathML}math")
 
-            # Convert to MathML
-            mathml_element = converter.convert_to_element(latex_formula)
-            # mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
-            mathml_string = converter.convert(latex_formula)
-            if "1mm" in mathml_string:
-                print(latex_formula, mathml_string)
+                    if mathml_element is not None:
+                        # Append the <math> element to the root <span class="katex"> element
+                        root.append(mathml_element)
+                        conversion_stats["success"] += 1
+                    else:
+                        conversion_stats["NoneType"] += 1
+                except TypeError as e:
+                    # print(e, ": ",latex_formula, mathml_string)
+                    conversion_stats["TypeError"] += 1
+                except Exception as e:
+                    conversion_stats["error"] += 1
+        
 
-            if '\\' in mathml_string or '\\\\' in mathml_string:
-                conversion_stats["unsupported"] += 1
-                continue
-            else:
-                conversion_stats["success"] += 1
+        def mathmlConverter(latex_formula):
+            # Convert LaTeX formula to MathML
+            try:
+                # Clean formula
+                latex_formula = remove_commands(latex_formula)
 
-            # Append equation to big xml
-            root.append(mathml_element)
+                # Convert to MathML
+                mathml_element = converter.convert_to_element(latex_formula)
+                # mathml_string = ET.tostring(mathml_element, encoding="unicode",method="xml")
+                mathml_string = converter.convert(latex_formula)
+                if "1mm" in mathml_string:
+                    print(latex_formula, mathml_string)
 
-        except InvalidAlignmentError:
-            conversion_stats["align"] += 1
+                if '\\' in mathml_string or '\\\\' in mathml_string:
+                    conversion_stats["unsupported"] += 1
+                    # continue
+                else:
+                    conversion_stats["success"] += 1
 
-        except DoubleSuperscriptsError:
-            conversion_stats["superscript"] += 1
+                # Append equation to big xml
+                root.append(mathml_element)
 
-        except DenominatorNotFoundError:
-            conversion_stats["denominator"] += 1
+            except InvalidAlignmentError:
+                conversion_stats["align"] += 1
 
-        except Exception as e:
-            # Handle other exceptions
-            conversion_stats["dunno"] += 1
+            except DoubleSuperscriptsError:
+                conversion_stats["superscript"] += 1
+
+            except DenominatorNotFoundError:
+                conversion_stats["denominator"] += 1
+
+            except Exception as e:
+                # Handle other exceptions
+                conversion_stats["dunno"] += 1
     
     
     print(f"The latex formulas were converted, here are the stats : {conversion_stats}")
@@ -124,6 +159,9 @@ def main(debug=False, select_raw=False):
     tree = ET.ElementTree(root)
     tree.write("dataset/equations.xml", encoding="utf-8", xml_declaration=True)
 
+def process_equations_in_batches(equations, batch_size=1000):
+    for i in range(0, len(equations), batch_size):
+        yield equations[i:i + batch_size]
 
 def remove_commands(text):
     """
@@ -140,3 +178,51 @@ def remove_commands(text):
 
     # Replace all occurrences of the pattern with an empty string
     return re.sub(pattern, '', text)
+
+def call_js(latex_equations, paper_id=""):
+    try:
+        current_file_path = os.path.dirname(os.path.abspath(__file__))
+        root_folder = os.path.dirname(current_file_path)
+        script_path = os.path.join(root_folder,"node" ,"tex2mathml_simple.js")
+
+        # Add the directory where node is installed to PATH
+        env = os.environ.copy()
+        node_bin_dir = "/data/nsam947/libs/node-v20.13.1-linux-x64/bin"
+        env["PATH"] = node_bin_dir + os.pathsep + env["PATH"]
+
+        # logging.debug("Running tex2mathml.js with environment PATH: {}".format(env["PATH"]))
+
+        result = subprocess.run(
+            [script_path],
+            input=json.dumps(latex_equations),
+            cwd=root_folder,
+            env=env,
+            universal_newlines=True,
+            text=True,
+            capture_output=True,
+            timeout=120
+        )
+
+        # logging.debug("stderr output: {}".format(result.stderr))
+        # logging.debug("stdout output: {}".format(result.stdout))
+
+        raw_output = result.stdout.strip()
+        # logging.debug("Raw output before JSON parsing: {}".format(raw_output))
+
+        # if result.stderr:
+        #     logging.warning("Unexpected error in tex2mathml.js (Arxiv ID: {}):".format(paper_id) + result.stderr)
+
+        if raw_output:
+            try:
+                result_data = json.loads(raw_output)
+                return result_data
+            except json.JSONDecodeError as e:
+                # logging.error("JSON decoding failed: {}".format(e))
+                return None
+
+    except subprocess.TimeoutExpired:
+        # logging.warning("Timeout for paper {}: \n".format(paper_id) + "\n")
+        return False
+    except Exception as e:
+        # logging.error("Error calling tex2mathml.js: {}".format(e))
+        return False
