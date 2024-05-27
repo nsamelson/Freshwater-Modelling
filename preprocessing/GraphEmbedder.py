@@ -1,5 +1,6 @@
 import html
 import json
+import math
 import unicodedata
 import numpy as np
 import torch
@@ -64,9 +65,21 @@ class GraphEmbedder:
             texts = [None,"<unk>"] + list(texts.keys())
             self.text_to_idx[tag] = {text: idx for idx, text in enumerate(texts)}
             self.embeddings[tag] = nn.Embedding(len(texts), embedding_dims,scale_grad_by_freq=scale_by_freq)
-        
-        #TODO: tag "mn" needs to be converted to nn.Linear
+         
+        #TODO: tag "mn" needs to be NORMALISED AND CONVERTED to nn.Linear (probably inside the model)
+        self.minimum = 0
+        self.maximum = 1e6
+        self.max_bound = self.maximum * 10 # set a maximum bound to accept data over the normalisation
+        # self.find_extremum_values(self.text_occurences_per_tag["mn"])
 
+    def normalise_number(self,number):  
+        try:
+            number = float(number)
+        except:
+            return None
+        if number >= self.max_bound:
+            return None
+        return (number - self.minimum) / (self.maximum - self.minimum)
 
 
     def text_to_index(self, text, tag):
@@ -88,7 +101,11 @@ class GraphEmbedder:
                 tags_indices[MATHML_TAGS.index(tag)] = self.text_to_index(text, tag)
             elif tag == "mn":
                 try:
-                    tags_indices[MATHML_TAGS.index(tag)] = float(text)
+                    normed_num = self.normalise_number(text)
+                    if normed_num != None:
+                        tags_indices[MATHML_TAGS.index(tag)] = normed_num
+                    else:
+                        return None
                 except:
                     return None
             else:
@@ -100,7 +117,7 @@ class GraphEmbedder:
     def embed_indices(self, indices):
         """
         This is a function to take into account the expansion of the features of certain tags when using nn.Embedding
-        TODO: verify this is working correclty
+        TODO: verify this is working correclty, when called in the model
         """
         embedded_features = []
         for i, tag in enumerate(MATHML_TAGS):

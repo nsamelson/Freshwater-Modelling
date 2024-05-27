@@ -1,7 +1,9 @@
 import json
+import numpy as np
 import torch
 import torch.nn as nn
 import xml.etree.ElementTree as ET
+from preprocessing.GraphEmbedder import GraphEmbedder
 
 with open("out/text_per_tag_katex.json","r") as f:
         text_occurences_per_tag = json.load(f)
@@ -10,34 +12,48 @@ def main():
 
     # tree = ET.parse("dataset/cleaned_formulas_katex.xml")
     # root = tree.getroot()
+    texts = ["1.98","209380","1","0.0008","9e7"]
+    embedder = GraphEmbedder()
 
 
-    texts = ["k","A","V","x"]
+    normalised = [embedder.normalise_number(num) for num in texts if embedder.normalise_number(num) is not None]
+    normalised = np.reshape(normalised,(len(normalised),1))
 
-    # with open("out/text_per_tag_katex.json","r") as f:
-    #     text_occurences_per_tag = json.load(f)
+#     numbers = [float(num) for num in texts]
+#     number_tensor = torch.tensor(numbers, dtype=torch.float32)
+    linear = SimpleNN(1,10)
+# #     output = linear(number_tensor.unsqueeze(0))  # Add batch dimension
+    output = linear(torch.tensor(normalised,dtype=torch.float32))
+    print(normalised)
+    print(output)
 
-    tag_list = text_occurences_per_tag.keys()
+
     
+class SimpleNN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(SimpleNN, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        return self.linear(x)
+
+#     mi_texts = text_occurences_per_tag["mi"]
+#     mi_dim = 10
+#     mi_count = len(mi_texts) + 1 # to take into account the unknown
+#     unk_token_id = 0
+
+#     mi_embedding = nn.Embedding(mi_count,mi_dim,sparse=True)
 
 
-    mi_texts = text_occurences_per_tag["mi"]
-    mi_dim = 10
-    mi_count = len(mi_texts) + 1 # to take into account the unknown
-    unk_token_id = 0
+#     mi_text_to_id = {text: idx for idx, text in enumerate(mi_texts)}
 
-    mi_embedding = nn.Embedding(mi_count,mi_dim,sparse=True)
+#     text_ids = [mi_text_to_id.get(text, unk_token_id) for text in texts ]
+#     mi_vec = mi_embedding(torch.tensor(text_ids))
 
 
-    mi_text_to_id = {text: idx for idx, text in enumerate(mi_texts)}
-
-    text_ids = [mi_text_to_id.get(text, unk_token_id) for text in texts ]
-    mi_vec = mi_embedding(torch.tensor(text_ids))
-
-
-    print("Embedding Table: ",mi_text_to_id)
-    print(f"Text {texts} is found in the table at id {text_ids}")
-    print(f"Torch vector is {mi_vec}")
+#     print("Embedding Table: ",mi_text_to_id)
+#     print(f"Text {texts} is found in the table at id {text_ids}")
+#     print(f"Torch vector is {mi_vec}")
 
 
     # hashed = hash("j") % mi_count
