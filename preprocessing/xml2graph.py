@@ -29,7 +29,9 @@ def main(generate_stats=False, debug=True):
     """
 
     # Load the MathML equation 
+    # tree = ET.parse('dataset/equations.xml')
     tree = ET.parse('dataset/cleaned_formulas_katex.xml')
+
     root = tree.getroot()
 
     pyg_graphs = []
@@ -39,9 +41,9 @@ def main(generate_stats=False, debug=True):
     # Iterate through each XML equation and create a graph
     for i, formula in enumerate(tqdm(root,desc="Generating Graphs",unit="equations")):
 
-        if debug and i >= 500:
+        if debug and i >= 5:
             break
-        
+
         # Build graph, embed it and convert to torch
         G = build_graph(formula)
         G = embedder.index_texts_in_graph(G)
@@ -63,19 +65,24 @@ def main(generate_stats=False, debug=True):
     # print("EDGES: ",pyg_G.edge_index)
 
     # Save dataset
-    torch.save(pyg_graphs, 'dataset/graph_formulas_katex.pt')
-    # data = {}
-    # data["edges"] = np.array([graph.edge_index for graph in pyg_graphs])
-    # data["x"] = np.array([graph.x for graph in pyg_graphs])
-    # np.save("dataset/graph_formulas_katex.npz",data)
+    torch.save(pyg_graphs, 'dataset/graph_formulas_katex_debug.pt')
+
 
 
 def convert_to_pyg(G):
     node_features = [node[1]['indices'] for node in G.nodes(data=True)]
-    # x = torch.tensor(node_features, dtype=torch.long)
-    x = np.array(node_features,dtype=np.float128)
-    pyg_graph = from_networkx(G)
-    pyg_graph.x = x
+    x = np.array(node_features,dtype=np.float32)
+    
+    # Extract edge index
+    edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
+
+    # For undirected graphs, make sure to add edges in both directions
+    if not G.is_directed():
+        edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)
+        
+    # Create the PyG Data object
+    pyg_graph = Data(x=x, edge_index=edge_index)
+
     return pyg_graph
 
 def build_graph(xml_root):

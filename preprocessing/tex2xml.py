@@ -63,6 +63,9 @@ def main(debug=False, select_raw=False,batch_size=1000):
     - select_raw (Bool): Set to True to run the full ```raw_formulas``` set
     """
 
+    # with open("dataset/latex_examples.json","r") as f:
+    #     data = json.load(f)
+
     data = load_dataset("OleehyO/latex-formulas", "cleaned_formulas",trust_remote_code=True) 
     if select_raw:
         data = load_dataset("OleehyO/latex-formulas", "raw_formulas",trust_remote_code=True) 
