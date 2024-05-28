@@ -70,7 +70,7 @@ class GraphEmbedder:
         self.minimum = 0
         self.maximum = 1e6
         self.max_bound = self.maximum * 10 # set a maximum bound to accept data over the normalisation
-        # self.find_extremum_values(self.text_occurences_per_tag["mn"])
+        self.linear_transform = nn.Linear(1,10)
 
     def normalise_number(self,number):  
         try:
@@ -95,6 +95,7 @@ class GraphEmbedder:
         """
         for node in G.nodes(data=True):
             tags_indices = np.zeros(len(MATHML_TAGS))
+            tags_indices[MATHML_TAGS.index("mn")] = - 1 # set to -1 to differenciate from the actual 0 number
             tag = node[1]['tag']
             text = node[1]['text']
             if tag in self.text_to_idx:
@@ -114,22 +115,45 @@ class GraphEmbedder:
         return G
     
 
-    def embed_indices(self, indices):
+    def embed_into_vector(self, indices):
         """
         This is a function to take into account the expansion of the features of certain tags when using nn.Embedding
-        TODO: verify this is working correclty, when called in the model
         """
         embedded_features = []
         for i, tag in enumerate(MATHML_TAGS):
+            tag_indices = indices[:, MATHML_TAGS.index(tag)] # List of indices for the specific tag
+            
+            # mi, mo and mtext
             if tag in self.embeddings:
-                idx = indices[i]
-                if idx == self.inactive_id:
-                    embedded_features.append(torch.zeros(self.embedding_dims))
-                else:
-                    embedded_features.append(self.embeddings[tag](torch.tensor([idx], dtype=torch.long)).squeeze(0))
+                
+                tag_indices = torch.tensor(tag_indices,dtype=torch.long)
+                # find indices that are inactive
+                zero_indices = torch.nonzero(tag_indices == 0).squeeze() 
+                
+                # Embed tags, and then replace the inactive ones with a vector of zeros
+                embedded_tags = self.embeddings[tag](tag_indices)
+                embedded_tags[zero_indices] = torch.zeros(self.embedding_dims)
+
+                embedded_features.append(embedded_tags)
+            
+            # mn: numerical values
+            elif tag == "mn":
+
+                # find indices that are inactive
+                negative_indices = torch.nonzero(tag_indices == -1).squeeze() 
+                
+                # Transform linearly everything
+                transformed = self.linear_transform(tag_indices.unsqueeze(1))
+                transformed[negative_indices] = torch.zeros(self.embedding_dims)
+
+                embedded_features.append(transformed)
+
             else:
-                embedded_features.append(torch.tensor([indices[i]]))
-        return torch.cat(embedded_features)
+                embedded_features.append(tag_indices.unsqueeze(1))
+                # print(tag_indices.shape)
+
+        # TODO: return a new list of MATHML_TAGS, for which when it's mn,mi,mo,mtext, it's duplicated
+        return torch.cat(embedded_features,dim=1)
 
 
 

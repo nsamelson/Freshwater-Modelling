@@ -29,8 +29,8 @@ def main(generate_stats=False, debug=True):
     """
 
     # Load the MathML equation 
-    # tree = ET.parse('dataset/equations.xml')
-    tree = ET.parse('dataset/cleaned_formulas_katex.xml')
+    tree = ET.parse('dataset/equations.xml')
+    # tree = ET.parse('dataset/cleaned_formulas_katex.xml')
 
     root = tree.getroot()
 
@@ -41,7 +41,7 @@ def main(generate_stats=False, debug=True):
     # Iterate through each XML equation and create a graph
     for i, formula in enumerate(tqdm(root,desc="Generating Graphs",unit="equations")):
 
-        if debug and i >= 5:
+        if debug and i >= 50:
             break
 
         # Build graph, embed it and convert to torch
@@ -71,7 +71,7 @@ def main(generate_stats=False, debug=True):
 
 def convert_to_pyg(G):
     node_features = [node[1]['indices'] for node in G.nodes(data=True)]
-    x = np.array(node_features,dtype=np.float32)
+    x = torch.tensor(node_features,dtype=torch.float32)
     
     # Extract edge index
     edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
