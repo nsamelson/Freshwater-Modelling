@@ -4,28 +4,47 @@ import torch
 import torch.nn as nn
 import xml.etree.ElementTree as ET
 from preprocessing.GraphEmbedder import GraphEmbedder
+from utils import plot
 
-with open("out/text_per_tag_katex.json","r") as f:
-        text_occurences_per_tag = json.load(f)
+
+
+def normalise(number, minimum, maximum):
+    return (number - minimum) / (maximum - minimum)
 
 def main():
+    with open("out/text_per_tag_katex.json","r") as f:
+        text_occurences_per_tag = json.load(f)
+
+    numbers = text_occurences_per_tag["mn"]
+    # numbers_to_plot = []
+    # for num in numbers:
+    #     try:
+    #         num = float(num)
+    #         numbers_to_plot.append(num)
+    #     except:
+    #         continue
+    # print(len(numbers_to_plot))
+    # plot.plot_numbers_distribution(numbers)
+    # numers = [0.00017,0.42,3.14,1,800,4e4,9e5,1e12]
+    # normalised_num = [normalise(num,0,1e7) for num in numers]
+    # print(normalised_num)
 
     # tree = ET.parse("dataset/cleaned_formulas_katex.xml")
     # root = tree.getroot()
-    texts = ["1.98","209380","1","0.0008","9e7"]
-    embedder = GraphEmbedder()
+#     texts = ["1.98","209380","1","0.0008","9e7"]
+#     embedder = GraphEmbedder()
 
 
-    normalised = [embedder.normalise_number(num) for num in texts if embedder.normalise_number(num) is not None]
-    normalised = np.reshape(normalised,(len(normalised),1))
+#     normalised = [embedder.normalise_number(num) for num in texts if embedder.normalise_number(num) is not None]
+#     normalised = np.reshape(normalised,(len(normalised),1))
 
-#     numbers = [float(num) for num in texts]
-#     number_tensor = torch.tensor(numbers, dtype=torch.float32)
-    linear = SimpleNN(1,10)
-# #     output = linear(number_tensor.unsqueeze(0))  # Add batch dimension
-    output = linear(torch.tensor(normalised,dtype=torch.float32))
-    print(normalised)
-    print(output)
+    # numbers = [float(num) for num in texts]
+    # number_tensor = torch.tensor(numbers, dtype=torch.float32)
+#     linear = SimpleNN(1,10)
+#     output = linear(number_tensor.unsqueeze(0))  # Add batch dimension
+#     output = linear(torch.tensor(normalised,dtype=torch.float32))
+#     print(normalised)
+#     print(output)
 
 
     
