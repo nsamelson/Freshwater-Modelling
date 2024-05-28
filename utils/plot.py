@@ -1,7 +1,11 @@
 import json
+import math
 from matplotlib import pyplot as plt
 import networkx as nx
-
+import numpy as np
+from scipy import stats
+import seaborn as sns
+from scipy.stats import norm, gaussian_kde
 
 def plot_labels_frequency():
     with open("out/xml_texts.json",mode="r") as f:
@@ -108,4 +112,58 @@ def plot_graph(G, name="graph"):
 
     # Show the graph
     plt.title('MathML Structure Graph')
+    plt.savefig(f'out/{name}.jpg', format='jpeg', dpi=300) 
+
+
+def plot_numbers_distribution(number_occurences,name="distrib"):
+
+    numbers = []
+    # occurrences = []
+
+    for key,value in number_occurences.items():
+        try:
+            num = float(key)
+            if num <= 1e15:
+                numbers.extend([num]*value)
+        except:
+            continue
+    
+    numbers = np.array(numbers)
+    # Calculate summary statistics
+    mean = np.mean(numbers)
+    median = np.median(numbers)
+    std_dev = np.std(numbers)
+    percentiles = np.percentile(numbers, [1,25, 50, 75,99])
+    print(percentiles)
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bins = np.logspace(-5,15,num=150,base=10)
+
+    # Histogram with KDE
+    # sns.histplot(numbers, bins=50, kde=True, color='blue', ax=ax)
+    ax.hist(numbers,bins=bins,color="blue",alpha=0.7)
+
+    # Add mean and median lines
+    ax.axvline(mean, color='red', linestyle='--', linewidth=1.5, label=f'Mean: {mean}')
+    ax.axvline(median, color='green', linestyle='-', linewidth=1.5, label=f'Median: {median}')
+
+    # Add standard deviation lines
+    ax.axvline(mean - std_dev, color='purple', linestyle='--', linewidth=1, label=f'Std Dev: {std_dev}')
+    ax.axvline(mean + std_dev, color='purple', linestyle='--', linewidth=1)
+
+    # Add percentiles
+    ax.axvline(percentiles[0], color='orange', linestyle='-.', linewidth=1.5, label=f'1st Percentile: {percentiles[0]:.2f}')
+    ax.axvline(percentiles[4], color='orange', linestyle='-.', linewidth=1.5, label=f'99th Percentile: {percentiles[4]:.2f}')
+
+
+    # Set x-scale to log
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_title('Distribution of Numbers')
+    ax.set_xlabel('Numbers')
+    ax.set_ylabel('Frequency')
+    ax.legend()
+
+    plt.tight_layout()
     plt.savefig(f'out/{name}.jpg', format='jpeg', dpi=300) 
