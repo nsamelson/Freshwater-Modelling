@@ -31,10 +31,8 @@ class GraphDecoder(torch.nn.Module):
         return x
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, latent_channels,embedder=GraphEmbedder,mathml_tags=[]):
+    def __init__(self, in_channels, hidden_channels, latent_channels):
         super(GraphAutoencoder, self).__init__()
-        self.embedder = embedder
-        self.mathml_tags = mathml_tags
 
         self.encoder = GraphEncoder(in_channels, hidden_channels, latent_channels)
         self.decoder = GraphDecoder(latent_channels, hidden_channels, in_channels)
@@ -49,5 +47,14 @@ class GraphAutoencoder(torch.nn.Module):
         x_hat = self.decoder(z, batch.edge_index)
         return x_hat, z
     
+class Encoder(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(Encoder, self).__init__()
+        self.conv1 = GCNConv(in_channels, 2 * out_channels, cached=False)
+        self.conv2 = GCNConv(2 * out_channels, out_channels, cached=False)
+
+    def forward(self, x, edge_index):
+        x = F.relu(self.conv1(x, edge_index))
+        return self.conv2(x, edge_index)
 
 
