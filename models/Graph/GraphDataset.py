@@ -1,69 +1,58 @@
+import os
 import torch
-import torch.nn.functional as F
-from torch_geometric.data import Data, InMemoryDataset, DataLoader
-from torch_geometric.nn import GCNConv
-
+from torch_geometric.data import Data, InMemoryDataset
+from tqdm import tqdm
+from preprocessing.xml2graph import build_graph, convert_to_pyg
 from preprocessing.GraphEmbedder import GraphEmbedder
+import xml.etree.ElementTree as ET
 
-# Custom Dataset Class
 class GraphDataset(InMemoryDataset):
-    def __init__(self, root, transform=None, pre_transform=None,pre_filter=None,embedder = GraphEmbedder):
-        super(GraphDataset, self).__init__(root, transform, pre_transform,pre_filter)
-        data_list = torch.load(root)
-        self.embedder = embedder
-        self.data, self.slices = self.collate(data_list)
+    def __init__(self, root, equations_file, transform=None, pre_transform=None):
+        self.equations_file = equations_file
+        super(GraphDataset, self).__init__(root, transform, pre_transform)
+        self.data, self.slices = torch.load(self.processed_paths[0])
     
-
+    @property
+    def raw_file_names(self):
+        return [self.equations_file]
     
-    # @staticmethod
-    def collate(self,data_list):
-        data_list.x = self.embedder.embed_into_vector(data_list.x)
-        data, slices = Data.collate(data_list)
-        return data, slices
+    @property
+    def processed_file_names(self):
+        return ['data.pt']
 
-    # def create_random_graph(num_nodes, num_features):
-    #     x = torch.randn(num_nodes, num_features)  # Random node features
-    #     edge_index = torch.randint(0, num_nodes, (2, num_nodes * 2))  # Random edges
-    #     return Data(x=x, edge_index=edge_index)
+    def download(self):
+        # Download to `self.raw_dir`.
+        pass
+    
+    def process(self,debug=False):
+        # Read data into huge `Data` list.
+        equations_path = os.path.join(self.raw_dir, self.equations_file)
+        tree = ET.parse(equations_path)
+        root = tree.getroot()
+        data_list = []
+        embedder = GraphEmbedder()
 
-    # def process(self):
-    #     # data_list = []
-    #     # num_graphs = 5  # Example: 5 random graphs
-    #     # for _ in range(num_graphs):
-    #     #     num_nodes = torch.randint(10, 20, (1,)).item()
-    #     #     num_features = 40
-    #     #     data = self.create_random_graph(num_nodes, num_features)
-    #     #     data_list.append(data)
+        for i, formula in enumerate(tqdm(root, desc="Generating Graphs", unit="equations")):
+            if debug and i>= 400:
+                break
+            G = build_graph(formula)
+            G = embedder.index_texts_in_graph(G)
+            if G is None:
+                continue
+            pyg_graph = convert_to_pyg(G)
+            pyg_graph.x = embedder.embed_into_vector(pyg_graph.x)
+            pyg_graph.x = pyg_graph.x.detach()  # Detach the tensor
+            # pyg_graph.x.requires_grad_(False)  # Ensure requires_grad is False
+            data_list.append(pyg_graph)
         
-    #     data, slices = self.collate(self.root)
-    #     return data, slices
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
 
-# class MyOwnDataset(InMemoryDataset):
-#     def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
-#         super().__init__(root, transform, pre_transform, pre_filter)
-#         self.load(self.processed_paths[0])
+    # def len(self):
+    #     data, slices = torch.load(self.processed_paths[0])
+    #     return len(slices[list(slices.keys())[0]]) - 1
+    
+    # def get(self, idx):
+    #     data, slices = torch.load(self.processed_paths[0])
+    #     return data.__class__.from_data_list([data.get_example(i) for i in range(idx, idx + 1)])
 
-
-#     @property
-#     def raw_file_names(self):
-#         return ['some_file_1', 'some_file_2', ...]
-
-#     @property
-#     def processed_file_names(self):
-#         return ['data.pt']
-
-#     # def download(self):
-#     #     # Download to `self.raw_dir`.
-#     #     download_url(url, self.raw_dir)
-
-#     def process(self):
-#         # Read data into huge `Data` list.
-#         data_list = [...]
-
-#         if self.pre_filter is not None:
-#             data_list = [data for data in data_list if self.pre_filter(data)]
-
-#         if self.pre_transform is not None:
-#             data_list = [self.pre_transform(data) for data in data_list]
-
-#         self.save(data_list, self.processed_paths[0])
