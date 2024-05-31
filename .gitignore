@@ -4,3 +4,4 @@ out/*
 dataset/*
 __pycache__
 node/node_modules/*
+trained_models/*

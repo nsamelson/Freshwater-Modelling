@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 import torch
 from torch_geometric.utils.convert import to_networkx, from_networkx
-from torch_geometric.data import DataLoader, Data
+from torch_geometric.data import DataLoader, Data, Dataset
 from tqdm import tqdm
 # from utils.plot import plot_labels_frequency
 from utils import save, stats, plot
@@ -22,7 +22,7 @@ from preprocessing.GraphEmbedder import GraphEmbedder
 
 
 
-def main(generate_stats=False, debug=True):
+def main(generate_stats=False, debug=False):
     """
     Generate a graph from mathml XML equations. 
     Source : https://github.com/Whadup/arxiv_learning/blob/ecml/arxiv_learning/data/load_mathml.py
@@ -65,7 +65,7 @@ def main(generate_stats=False, debug=True):
     # print("EDGES: ",pyg_G.edge_index)
 
     # Save dataset
-    torch.save(pyg_graphs, 'dataset/graph_formulas_katex_debug.pt')
+    torch.save(pyg_graphs, 'dataset/graph_formulas_katex.pt')
 
 
 

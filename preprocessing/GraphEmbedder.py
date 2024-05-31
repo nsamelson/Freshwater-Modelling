@@ -125,14 +125,16 @@ class GraphEmbedder:
             
             # mi, mo and mtext
             if tag in self.embeddings:
-                
-                tag_indices = torch.tensor(tag_indices,dtype=torch.long)
+                tag_indices = tag_indices.long()
+                # tag_indices = torch.tensor(tag_indices,dtype=torch.long)
                 # find indices that are inactive
                 zero_indices = torch.nonzero(tag_indices == 0).squeeze() 
                 
                 # Embed tags, and then replace the inactive ones with a vector of zeros
                 embedded_tags = self.embeddings[tag](tag_indices)
                 embedded_tags[zero_indices] = torch.zeros(self.embedding_dims)
+                # embedded_tags.requires_grad_(False) # Ensure requires_grad is False
+                # embedded_tags = embedded_tags.detach()  # Detach the tensor
 
                 embedded_features.append(embedded_tags)
             
@@ -146,10 +148,15 @@ class GraphEmbedder:
                 transformed = self.linear_transform(tag_indices.unsqueeze(1))
                 transformed[negative_indices] = torch.zeros(self.embedding_dims)
 
+                # transformed = transformed.detach()  # Detach the tensor
+                # transformed.requires_grad_(False)  # Ensure requires_grad is False
                 embedded_features.append(transformed)
 
             else:
-                embedded_features.append(tag_indices.unsqueeze(1))
+                tag_indices = tag_indices.unsqueeze(1)
+                # tag_indices.requires_grad_(False)  # Ensure requires_grad is False
+                # tag_indices = tag_indices.detach()  # Detach the tensor
+                embedded_features.append(tag_indices)
                 # print(tag_indices.shape)
 
         # TODO: return a new list of MATHML_TAGS, for which when it's mn,mi,mo,mtext, it's duplicated
