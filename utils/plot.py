@@ -167,3 +167,56 @@ def plot_numbers_distribution(number_occurences,name="distrib"):
 
     plt.tight_layout()
     plt.savefig(f'out/{name}.jpg', format='jpeg', dpi=300) 
+
+
+def plot_loss_graph(val_losses,train_losses, dir_path):
+
+    num_epochs = len(train_losses)
+
+    plt.figure()
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss', color='blue')
+    plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss', color='orange')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Train and Validation Loss')
+    plt.legend()
+    plt.savefig(f'{dir_path}/loss_graph.png')
+
+def plot_training_graphs(history,dir_path):
+
+    train_losses, val_losses, aucs, aps = history["train_loss"], history["val_loss"], history["auc"], history["ap"]
+
+    epochs = range(1, len(train_losses) + 1)
+
+    # Create a figure with subplots
+    fig, ax = plt.subplots(2, 1, figsize=(15, 10))
+    # fig.suptitle('Training Metrics Over Epochs')
+
+    # Plot Train and Validation Losses
+    ax1 = ax[0]
+    ax1.plot(epochs, train_losses, label='Train Loss', color='blue')
+    ax1.plot(epochs, val_losses, label='Validation Loss', color='orange')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Train & Validation Loss')
+    ax1.legend()
+    ax1.grid(True)
+
+    # # Remove the top-right empty plot
+    # fig.delaxes(ax[0, 1])
+
+    # Plot AUC
+    ax2 = ax[1]
+    ax2.plot(epochs, aucs, label='AUC', color='green')
+    ax2.plot(epochs, aps, label='AP', color='red')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Score')
+    ax2.set_title('AUC & AP scores')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save the figure
+    plt.savefig(f'{dir_path}/training_metrics.png')
