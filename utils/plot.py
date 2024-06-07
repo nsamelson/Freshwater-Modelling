@@ -184,7 +184,7 @@ def plot_loss_graph(val_losses,train_losses, dir_path):
 
 def plot_training_graphs(history,dir_path):
 
-    train_losses, val_losses, aucs, aps = history["train_loss"], history["val_loss"], history["auc"], history["ap"]
+    train_losses, val_losses, aucs, aps = history["loss"], history["val_loss"], history["auc"], history["ap"]
 
     epochs = range(1, len(train_losses) + 1)
 

@@ -28,6 +28,7 @@ from tensorboardX import SummaryWriter
 
 from utils.plot import plot_loss_graph, plot_training_graphs
 from utils.save import json_dump
+import pandas as pd
 
 def main():
     # Fix the randomness
@@ -40,6 +41,22 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
+    # # path = "/data/nsam947/ray_results/train_model_2024-06-05_18-10-34/train_model_2271f6c6_20_batch_size\=256\,hidden_channels\=32\,lr\=0.0011\,out_channels\=16_2024-06-05_18-50-55/result.json"
+    # result_dir = "/data/nsam947/ray_results/train_model_2024-06-05_18-10-34/"
+    # trials = os.listdir(result_dir)
+    # trial_path = [path for path in trials if "2271f6c6" in path][0]
+    # trial_path = os.path.join(result_dir,trial_path,"progress.csv")
+
+    # result = pd.read_csv(trial_path)
+    # # with open(trial_path,"r") as f:
+    # #     result = json.load(f)
+    
+    # metrics_head = result.keys()[:4]
+    # metrics = {key:list(result[key]) for key in metrics_head}
+    # plot_training_graphs(metrics,"out/")
+
+    # return
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -152,10 +169,11 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False):
     model.train()
     total_train_loss = 0
 
-    # Setup tqdm or cancel if searching
-    batches = tqdm(train_loader,desc=f"training epoch {epoch}",unit="batch")
+    # Setup tqdm or not if searching
     if searching:
         batches = train_loader
+    else:
+        batches = tqdm(train_loader,desc=f"training epoch {epoch}",unit="batch")
     
     for batch in batches:
         optimizer.zero_grad()
