@@ -1,9 +1,13 @@
 import json
+import random
 import unicodedata
 from matplotlib import pyplot as plt
 import networkx as nx
 import xml.etree.ElementTree as ET
 import html
+import numpy as np
+from sklearn.preprocessing import PowerTransformer, RobustScaler
+import torch
 from tqdm import tqdm
 from utils import save, plot
 
@@ -88,11 +92,12 @@ def xml_occurences(xml_path="dataset/equations.xml", debug=False):
     save.json_dump("out/xml_texts.json",xml_texts)
     plot.plot_labels_frequency()
 
-def count_text_occurences_per_tag(xml_path="dataset/cleaned_formulas_katex.xml", debug=False):
+def count_text_occurences_per_tag(xml_path="dataset/raw/cleaned_formulas_katex.xml", debug=False):
 
     tree = ET.parse(xml_path)
     root = tree.getroot()
     embedding_table = {tag:dict() for tag in MATHML_TAGS}
+    vocab_table = {"":0,"<unk>":1}
 
     bad_things = {"numbers":0}
 
@@ -115,6 +120,8 @@ def count_text_occurences_per_tag(xml_path="dataset/cleaned_formulas_katex.xml",
                     bad_things["numbers"] +=1
 
             embedding_table[tag][text] = embedding_table[tag].get(text,0) + 1
+            if text not in vocab_table:
+                vocab_table[text] = len(vocab_table)
 
             children = [x for x in child]
             if children:
@@ -133,13 +140,84 @@ def count_text_occurences_per_tag(xml_path="dataset/cleaned_formulas_katex.xml",
             print(f"{tag} : {len(values)} - examples : {list(values)[0:5] if len(values)>5 else list(values)}")
     print(bad_things)
     
+    save.json_dump("out/vocab_texts_katex.json",vocab_table)
+
     # Trasform to dict of lists then save it
     # texts_per_tag = {key: list(value) for key,value in embedding_table.items()}
-    save.json_dump("out/text_per_tag_katex.json",embedding_table)
+    # save.json_dump("out/text_per_tag_katex.json",embedding_table)
 
-    # Plot occurences per tag
-    plot.plot_text_frequency_per_tag("out/text_per_tag_katex.json")
+    # # Plot occurences per tag
+    # plot.plot_text_frequency_per_tag("out/text_per_tag_katex.json")
     
+def test_different_feature_scalings():
+    seed_value = 0
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    torch.cuda.manual_seed(seed_value)
+    torch.cuda.manual_seed_all(seed_value)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    with open("out/text_per_tag_katex.json","r") as f:
+        text_occurences_per_tag = json.load(f)
+
+    num_values = text_occurences_per_tag["mn"]
+    num_list = []
+    for key, value in num_values.items():
+        try:
+            key = float(key)
+            if key <= 1e6:
+                num_list += [key] * value
+        except:
+            continue
+
+    # numbers_occ = [[float(key)]*value for key, value in numbers.items() if float(key)!= None]
+    # flat_numbers = [x for xs in numbers_occ for x in xs]
+    num_vec = np.array(num_list,dtype=np.float32)
+    np.random.shuffle(num_vec)
+    numbers = num_vec.reshape(-1,16)
+
+    # print(numbers[0])
+
+    dtype = torch.float32
+    # numbers = np.array([[0, 1e-2, 2e-1, 1],
+    #                     [3.14, 5e3, 5e2, 0.01]],dtype=np.float32)
+
+    # min-max normalisation
+    normed = normalize(numbers)
+
+    # Mean normalisation
+    mean_val = np.mean(numbers)
+    range_val = np.ptp(numbers)  # Range is max - min
+    mean_normed = mean_normalize(numbers, mean_val, range_val)
+
+    # Log transformation
+    log_transformed = log_transform(numbers)
+
+    # robust scaling
+    scaler = RobustScaler()
+    scaled = scaler.fit_transform(numbers)
+    # print(numbers[12],scaled[12])
+    reverse_scaled = scaler.inverse_transform(scaled)
+
+    # box-cox transfo
+    pt = PowerTransformer(method='yeo-johnson', standardize=False)
+    power_transformed = pt.fit_transform(numbers)
+    reverse_powered = pt.inverse_transform(power_transformed)
+
+
+    big_numbers = {
+        "original":numbers,
+        "min-max_normalisation":normed,
+        "mean_normalisation":mean_normed,
+        "log_transform":log_transformed,
+        "robust_scaling":scaled,
+        "power_transformation":power_transformed
+    }
+
+    plot.plot_multiple_distributions(big_numbers)
+
 
 
 def decode_xml_entities(text):
@@ -158,3 +236,20 @@ def clean_text(text):
 def rn(x):
     """Remove Namespace"""
     return x.replace(r"{http://www.w3.org/1998/Math/MathML}", "")
+
+def log_transform(number):
+    return np.log10(number + 1e-7)
+    # return torch.log(torch.tensor(number + 1e-7))
+
+def inverse_log_transform(tensor):
+    return torch.exp(tensor) - 1e-7
+
+def mean_normalize(number, mean, range_val):
+    return (number - mean) / range_val
+
+def inverse_mean_normalize(normalized_number, mean, range_val):
+    return (normalized_number * range_val) + mean
+
+
+def normalize(number,min_val=0,max_val=1e6):
+    return (number - min_val) / (max_val - min_val)

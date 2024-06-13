@@ -1,11 +1,13 @@
 import json
 import math
+import os
 from matplotlib import pyplot as plt
 import networkx as nx
 import numpy as np
 from scipy import stats
 import seaborn as sns
 from scipy.stats import norm, gaussian_kde
+from torch_geometric.utils.convert import to_networkx, from_networkx
 
 def plot_labels_frequency():
     with open("out/xml_texts.json",mode="r") as f:
@@ -97,12 +99,50 @@ def plot_text_frequency_per_tag(text_per_tag_path="out/text_per_tag.json"):
     print("Saved plot")
 
 
+MATHML_TAGS = [
+    "maction",
+    "math",
+    "menclose",
+    "merror", 
+    "mfenced",
+    "mfrac", 
+    "mglyph", 
+    "mi", 	
+    "mlabeledtr", 
+    "mmultiscripts", 
+    "mn",
+    "mo",
+    "mover", 	
+    "mpadded", 	
+    "mphantom", 	
+    "mroot", 	
+    "mrow", 
+    "ms", 	
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",  
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
+    "munderover",
+    "semantics", 
+]
+
+
 def plot_graph(G, name="graph"):
     # Draw the graph using NetworkX's built-in drawing functions
     plt.figure()
     pos = nx.spring_layout(G)  # Compute graph layout
 
-    texts = {n: lab["tag"] +"_"+ lab["text"] if lab["text"] else lab["tag"] for n,lab in G.nodes(data=True)}
+    try:
+        texts = {n: lab["tag"] +"_"+ lab["text"] if lab["text"] else lab["tag"] for n,lab in G.nodes(data=True)}
+    except:
+        texts = {i:text["x"] for i,text in G.nodes(data=True)}
 
     nx.draw_networkx_nodes(G, pos=pos, node_size=500, node_color='lightblue')
     nx.draw_networkx_edges(G, pos=pos, width=1.0, alpha=0.5)
@@ -110,9 +150,17 @@ def plot_graph(G, name="graph"):
 
     plt.axis('off')
 
+    dir = os.getcwd()
+    path = os.path.join(dir,"out",f"{name}.jpg")
+
     # Show the graph
     plt.title('MathML Structure Graph')
-    plt.savefig(f'out/{name}.jpg', format='jpeg', dpi=300) 
+    plt.savefig(path, format='jpeg', dpi=300) 
+
+def plot_from_pyg(pyg,name="pyg"):
+    
+    G = to_networkx(pyg)
+    plot_graph(G,name)
 
 
 def plot_numbers_distribution(number_occurences,name="distrib"):
@@ -220,3 +268,66 @@ def plot_training_graphs(history,dir_path):
 
     # Save the figure
     plt.savefig(f'{dir_path}/training_metrics.png')
+
+def plot_multiple_distributions(arrays_dict={}):
+
+
+    # Create a figure with 6 subplots
+    fig, axs = plt.subplots(2, 3, figsize=(20, 12))
+
+    x,y = 0,0
+    for title, array in arrays_dict.items():
+        flattened_array = array.flatten()
+
+        max_val = np.max(flattened_array)
+        min_val = np.min(flattened_array)  
+        if title == "mean_normalisation":
+            flattened_array = flattened_array - min_val
+        
+        nonzero_data = flattened_array[flattened_array > 0]
+        log_values = np.log10(nonzero_data)
+        smallest_exponent = np.min(np.floor(log_values))
+        biggest_exponent = np.max(np.floor(log_values)) + 1
+
+
+        mean = np.mean(flattened_array)
+        median = np.median(flattened_array)
+        std_dev = np.std(flattened_array)
+        percentiles = np.percentile(flattened_array, [25, 75])
+
+        axs[x,y].axvline(mean, color='red', linestyle='--', linewidth=1.5, label=f'Mean: {mean:.2e}')
+        axs[x,y].axvline(median, color='green', linestyle='-', linewidth=1.5, label=f'Median: {median:.2e}')
+        axs[x,y].axvline(mean - std_dev, color='purple', linestyle='--', linewidth=1, label=f'Std Dev: {std_dev:.2e}')
+        axs[x,y].axvline(mean + std_dev, color='purple', linestyle='--', linewidth=1)
+        axs[x,y].axvline(percentiles[0], color='orange', linestyle='-.', linewidth=1.5, label=f'Q1: {percentiles[0]:.2e}')
+        axs[x,y].axvline(percentiles[1], color='orange', linestyle='-.', linewidth=1.5, label=f'Q3: {percentiles[1]:.2e}')
+
+        if title in ["original","robust_scaling","min-max_normalisation","mean_normalisation"]:
+
+            # if min_val >= 0:
+            bins = np.logspace(smallest_exponent,biggest_exponent,num=100,base=10)
+            axs[x,y].set_xscale('log')
+        
+        else:
+            bins = 100
+        
+        axs[x,y].hist(flattened_array, bins=bins, alpha=0.75, color='blue')
+        
+
+        axs[x,y].set_title(title)
+        axs[x,y].set_ylabel('occurences')
+        axs[x,y].set_yscale('log')
+        axs[x,y].set_xlabel('value')
+
+        axs[x,y].legend()
+        if x < 1:
+            x+=1
+        else:
+            x=0
+            y+=1
+
+    plt.suptitle('Different feature scaling methods',fontsize=16)
+    # Adjust layout
+    plt.tight_layout()
+    # Save the figure
+    plt.savefig('out/transformation_distributions.png')
