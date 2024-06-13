@@ -7,12 +7,12 @@ from models import train, search
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-tx", "--tex2xml", metavar='\b', default=False, type=bool, help="Default False. Download Tex equations, convert to XML and save dataset")
-    parser.add_argument("-xg", "--xml2graph", metavar='\b', default=False, type=bool, help="Default False. Load XML, convert to graph and save dataset")
-    parser.add_argument("-st", "--stats", metavar='\b', default=False, type=bool, help="Default False. Create stats")
-    parser.add_argument("-te", "--test", metavar='\b', default=False, type=bool, help="Default False. Test things")
-    parser.add_argument("-tr", "--train", metavar='\b', default=False, type=bool, help="Default False. Train things")
-    parser.add_argument("-se", "--search", metavar='\b', default=False, type=bool, help="Default False. Search hyperparams")
+    parser.add_argument("-tx", "--tex2xml", action="store_true", help="Default False. Download Tex equations, convert to XML and save dataset")
+    parser.add_argument("-xg", "--xml2graph", action="store_true", help="Default False. Load XML, convert to graph and save dataset")
+    parser.add_argument("-st", "--stats", action="store_true", help="Default False. Create stats")
+    parser.add_argument("-te", "--test", action="store_true", help="Default False. Test things")
+    parser.add_argument("-tr", "--train", action="store_true", help="Default False. Train things")
+    parser.add_argument("-se", "--search", action="store_true", help="Default False. Search hyperparams")
 
 
 
