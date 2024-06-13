@@ -91,6 +91,7 @@ def build_graph(xml_root):
 
     """
     G = nx.Graph()
+    # G = nx.DiGraph()
 
     def create_node(element,parent_uid=0):
         global uid
@@ -106,17 +107,18 @@ def build_graph(xml_root):
             uid = 1                                              # start new nodes from uid=1
 
         # Go through each child
-        for child in element:
+        for i, child in enumerate(element):
             # Set tag and text
             tag = rn(child.tag)
             text = "" if child.text is None else clean_text(child.text)
+            pos = i
 
             # Unwanted Latex tag
             if tag == "annotation": 
                 continue
 
             # Add new node and edge between himself and the parent
-            G.add_node(uid, tag=tag, text=text,)
+            G.add_node(uid, tag=tag, text=text,pos=pos)
             G.add_edge(parent_uid, uid)
             uid += 1
 
