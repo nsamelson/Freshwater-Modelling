@@ -31,8 +31,12 @@ class GraphDecoder(torch.nn.Module):
         return x
 
 class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, latent_channels):
+    def __init__(self, in_channels, hidden_channels, latent_channels,layers=4,embedding_dim=192):
         super(GraphAutoencoder, self).__init__()
+        self.layers = layers
+        self.embedding_dim = embedding_dim
+
+        self.embedding = nn.Embedding()
 
         self.encoder = GraphEncoder(in_channels, hidden_channels, latent_channels)
         self.decoder = GraphDecoder(latent_channels, hidden_channels, in_channels)
@@ -58,18 +62,15 @@ class Encoder(torch.nn.Module):
         return self.conv2(x, edge_index)
 
 
-class SimpleEncoder(nn.Module):
-   def __init__(self, in_channels, out_channels):
-       super(SimpleEncoder, self).__init__()
-       self.encoder = nn.Sequential(
-           nn.Linear(in_channels, 16),
-           nn.ReLU(),
-           nn.Linear(16, out_channels),
-           nn.ReLU()
-       )
-       
 
-   def forward(self, x, edge_index):
-       z = self.encoder(x, edge_index)
-       return z
 
+class VariationalGCNEncoder(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv1 = GCNConv(in_channels, 2 * out_channels)
+        self.conv_mu = GCNConv(2 * out_channels, out_channels)
+        self.conv_logstd = GCNConv(2 * out_channels, out_channels)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index).relu()
+        return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)

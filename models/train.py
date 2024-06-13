@@ -22,7 +22,7 @@ import torch_geometric.transforms as T
 from tqdm import tqdm
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Encoder, GraphAutoencoder, GraphEncoder, SimpleEncoder
+from models.Graph.GraphAutoEncoder import Encoder, GraphAutoencoder, GraphEncoder, VariationalGCNEncoder
 import random
 from tensorboardX import SummaryWriter
 
@@ -58,26 +58,45 @@ def main():
 
     # return
 
+    # Create dir for saving model
+    dir_path = "trained_models/exp_3"
+    if not os.path.exists(dir_path):
+        os.mkdir(dir_path)
+
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('CUDA availability:', device)
 
     # Load dataset 
     print("Loading dataset...")
-    dataset = GraphDataset(root='dataset/', equations_file='cleaned_formulas_katex.xml')
-    # dataset.process(debug=False) # TODO: uncomment to reprocess if change of dataset or preprocessing!!!
+    # transform = T.Compose([
+    #     # T.NormalizeFeatures(),
+    #     T.ToDevice(device),
+    #     # T.RandomNodeSplit()
+    #     # T.RandomLinkSplit(num_val=0.05, num_test=0.1, is_undirected=True, # splits on the graph level, and in my case I have a list of graphs
+    #     #     split_labels=False, add_negative_train_samples=False),
+    # ])
+    dataset = GraphDataset(root='dataset/', equations_file='cleaned_formulas_katex.xml',force_reload=False, debug=False,embedding_dims=25) #transform=transform)
+    in_channels = dataset.num_features
 
     print(dataset.get_summary())
+    print("Number of input channels: ", in_channels)
+    
+    # return
+
     data_size = len(dataset)
     train_data = dataset[:int(data_size * 0.8)]
     val_data = dataset[int(data_size * 0.8):int(data_size * 0.9)]
     test_data = dataset[int(data_size * 0.9):]
 
-    in_channels = dataset.num_features
-    model = pyg_nn.GAE(GraphSAGE(in_channels,hidden_channels=32,num_layers=4,out_channels=4))
-    # model = pyg_nn.GAE(Encoder(in_channels, 16))
+    # model = pyg_nn.VGAE(VariationalGCNEncoder(in_channels, 16))
+    # model = pyg_nn.GAE(GraphSAGE(in_channels,hidden_channels=32,num_layers=4,out_channels=4))
+    model = pyg_nn.GAE(Encoder(in_channels, 32, 16))
     # model = pyg_nn.GAE(GraphEncoder(in_channels, 16,8))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+    variational=False
+
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # criterion = torch.nn.MSELoss()
 
     # Early stopping
@@ -98,15 +117,15 @@ def main():
     # Training loop
     best_val_loss = float('inf')
     num_epochs = 25
-    history = {"train_loss":[],"val_loss":[],"auc":[],"ap":[]}
+    history = {"loss":[],"val_loss":[],"auc":[],"ap":[]}
 
     # Training loop
     for epoch in range(num_epochs):
         # Training phase
-        avg_train_loss = train_one_epoch(model,optimizer,epoch,train_loader,device)
+        avg_train_loss = train_one_epoch(model,optimizer,epoch,train_loader,device, variational=variational)
         
         # validation phase
-        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device)
+        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,variational=variational)
         
         # Add to tensorboardX
         # writer.add_scalar("Loss/train", avg_train_loss, epoch)
@@ -115,7 +134,7 @@ def main():
         writer.add_scalar("Metrics/AUC", avg_auc, epoch)
         writer.add_scalar("Metrics/AP", avg_ap, epoch)
 
-        history["train_loss"].append(avg_train_loss)
+        history["loss"].append(avg_train_loss)
         history["val_loss"].append(avg_val_loss)
         history["auc"].append(avg_auc)
         history["ap"].append(avg_ap)
@@ -136,10 +155,7 @@ def main():
             print("Early stopping triggered")
             break
     
-    # Create dir for saving model
-    dir_path = "trained_models/exp_3"
-    if not os.path.exists(dir_path):
-        os.mkdir(dir_path)
+    
 
     # Save the best model
     try:
@@ -164,7 +180,7 @@ def main():
 
 
 
-def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False):
+def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,variational=False):
     # Training phase
     model.train()
     total_train_loss = 0
@@ -184,11 +200,15 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False):
         neg_edge_index = negative_sampling(
             edge_index=pos_edge_index, 
             num_nodes=batch.num_nodes, 
-            num_neg_samples=pos_edge_index.size(1)
+            num_neg_samples=pos_edge_index.size(1),
+            force_undirected=False,
+            method="sparse"
         ).to(device)
         
         z = model.encode(batch.x, batch.edge_index)
         loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+        if variational:
+            loss = loss + (1 / batch.num_nodes) * model.kl_loss()
         loss.backward()
         optimizer.step()
         total_train_loss += loss.item()
@@ -196,7 +216,7 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False):
     avg_train_loss = total_train_loss / len(train_loader)
     return avg_train_loss
 
-def validate(model,val_loader,device):
+def validate(model,val_loader,device,variational=False):
     model.eval()
     total_val_loss = 0
     total_auc = 0
@@ -211,11 +231,15 @@ def validate(model,val_loader,device):
             neg_edge_index = negative_sampling(
                 edge_index=pos_edge_index, 
                 num_nodes=batch.num_nodes, 
-                num_neg_samples=pos_edge_index.size(1)
+                num_neg_samples=pos_edge_index.size(1),
+                force_undirected=False,
+                method="sparse"
             ).to(device)
             
             z = model.encode(batch.x, batch.edge_index)
             loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+            if variational:
+                loss = loss + (1 / batch.num_nodes) * model.kl_loss()
             total_val_loss += loss.item()
 
             auc, ap = model.test(z, pos_edge_index, neg_edge_index)
