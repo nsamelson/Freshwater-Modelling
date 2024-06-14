@@ -22,7 +22,7 @@ import torch_geometric.transforms as T
 from tqdm import tqdm
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Encoder, GraphAutoencoder, GraphEncoder, VariationalGCNEncoder
+from models.Graph.GraphAutoEncoder import Encoder, GraphEncoder, VariationalGCNEncoder
 import random
 from tensorboardX import SummaryWriter
 
@@ -59,7 +59,7 @@ def main():
     # return
 
     # Create dir for saving model
-    dir_path = "trained_models/exp_3"
+    dir_path = "trained_models/exp_5"
     if not os.path.exists(dir_path):
         os.mkdir(dir_path)
 
@@ -69,6 +69,7 @@ def main():
 
     # Load dataset 
     print("Loading dataset...")
+    # data augm
     # transform = T.Compose([
     #     # T.NormalizeFeatures(),
     #     T.ToDevice(device),
@@ -76,8 +77,10 @@ def main():
     #     # T.RandomLinkSplit(num_val=0.05, num_test=0.1, is_undirected=True, # splits on the graph level, and in my case I have a list of graphs
     #     #     split_labels=False, add_negative_train_samples=False),
     # ])
-    dataset = GraphDataset(root='dataset/', equations_file='cleaned_formulas_katex.xml',force_reload=False, debug=False,embedding_dims=25) #transform=transform)
+    dataset = GraphDataset(root='dataset/', equations_file='cleaned_formulas_katex.xml',force_reload=False, debug=False) #transform=transform)
     in_channels = dataset.num_features
+    vocab_size = dataset.vocab_size
+
 
     print(dataset.get_summary())
     print("Number of input channels: ", in_channels)
@@ -91,12 +94,12 @@ def main():
 
     # model = pyg_nn.VGAE(VariationalGCNEncoder(in_channels, 16))
     # model = pyg_nn.GAE(GraphSAGE(in_channels,hidden_channels=32,num_layers=4,out_channels=4))
-    model = pyg_nn.GAE(Encoder(in_channels, 32, 16))
+    model = pyg_nn.GAE(Encoder(in_channels,16,8,embedding_dim=192,layers = 4,vocab_size=vocab_size,scale_grad_by_freq=False))
     # model = pyg_nn.GAE(GraphEncoder(in_channels, 16,8))
     variational=False
 
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     # criterion = torch.nn.MSELoss()
 
     # Early stopping

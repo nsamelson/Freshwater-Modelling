@@ -7,3 +7,4 @@ node/node_modules/*
 trained_models/*
 log/*
 data/ray_results/*
+.vscode/*
