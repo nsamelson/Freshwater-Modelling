@@ -1,5 +1,6 @@
 import html
 import json
+import os
 import networkx as nx
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -47,8 +48,10 @@ class GraphBuilder:
     def __init__(self,vocab_path="out/vocab_texts_katex.json",graph_type="Graph"):
         self.mathml_tags = MATHML_TAGS
         self.graph_type = graph_type if graph_type in ["DiGraph","MultiGraph","MultiDiGraph","Graph"] else "Graph"
+        self.vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling",vocab_path)
 
-        with open(vocab_path,"r") as f:
+        
+        with open(self.vocab_path,"r") as f:
             self.text_to_idx = json.load(f)
         
         self.inactive_id = 0
@@ -123,14 +126,14 @@ class GraphBuilder:
             tags_indices[MATHML_TAGS.index(tag)] = 1
 
             # Set the index at the last index
-            if tag in self.text_to_idx: 
-                tags_indices[-1] = self.text_to_index(text, tag) 
+            tags_indices[-1] = self.text_to_idx.get(text,0)
+            
             node[1]['indices'] = tags_indices
         return G
 
     def convert_to_pyg(self,G):
         node_features = np.array([node[1]['indices'] for node in G.nodes(data=True)],dtype=np.float32)
-        x = torch.tensor(node_features,dtype=torch.float32)
+        x = torch.tensor(node_features,dtype=torch.long)
 
         # Extract position in leaf
         pos_list = np.array([node[1]['pos'] for node in G.nodes(data=True)],dtype=np.float32)
