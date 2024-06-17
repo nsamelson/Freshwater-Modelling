@@ -8,17 +8,6 @@ from torch_geometric.data import DataLoader, Data
 from preprocessing.GraphEmbedder import GraphEmbedder
 
 
-class GraphEncoder(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
-        super(GraphEncoder, self).__init__()
-        self.conv1 = GraphConv(in_channels, hidden_channels) # TODO: or GCNCONV!!!
-        self.conv2 = GraphConv(hidden_channels, out_channels) # TODO: or GCNCONV!!!
-
-    def forward(self, x, edge_index):
-        x = F.relu(self.conv1(x, edge_index))
-        x = self.conv2(x, edge_index)
-        return x
-
 
 
     
@@ -54,10 +43,6 @@ class Encoder(torch.nn.Module):
         for i in range(self.layers-1):
             new_x = F.relu(self.convs[i](new_x, edge_index))
         return self.convs[-1](new_x, edge_index)
-        # new_x = F.relu(self.conv1(new_x, edge_index))
-        # return self.conv2(new_x, edge_index)
-
-
 
 
 

@@ -26,7 +26,8 @@ if __name__=="__main__":
     
     if args.stats:
         # stats.xml_occurences()
-        stats.count_text_occurences_per_tag()
+        # stats.count_text_occurences_per_tag()
+        stats.extract_data_from_search()
 
     if args.train:
         train.main()

@@ -4,7 +4,7 @@ from torch_geometric.data import Data, InMemoryDataset
 from tqdm import tqdm
 # from preprocessing.xml2graph import build_graph, convert_to_pyg
 from preprocessing.GraphBuilder import GraphBuilder
-from preprocessing.GraphEmbedder import GraphEmbedder
+# from preprocessing.GraphEmbedder import GraphEmbedder
 from utils.plot import plot_graph
 import xml.etree.ElementTree as ET
 import networkx as nx
@@ -46,20 +46,6 @@ class GraphDataset(InMemoryDataset):
                 continue
             pyg_graph = self.builder.convert_to_pyg(G)
             data_list.append(pyg_graph)
-
-        # embedder = GraphEmbedder(embedding_dims=self.embedding_dims)
-        # for i, formula in enumerate(tqdm(root, desc="Generating Graphs", unit="equations")):
-        #     if self.debug and i>= 4:
-        #         break
-        #     G = build_graph(formula)
-        #     G = embedder.index_texts_in_graph(G)
-        #     if G is None:
-        #         continue
-        #     pyg_graph = convert_to_pyg(G)
-        #     pyg_graph.x = embedder.embed_into_vector(pyg_graph.x)
-        #     pyg_graph.x = pyg_graph.x.detach()  # Detach the tensor
-        #     # pyg_graph.x.requires_grad_(False)  # Ensure requires_grad is False
-        #     data_list.append(pyg_graph)
         
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
