@@ -183,7 +183,7 @@ def main():
 
 
 
-def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,variational=False):
+def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,variational=False,force_undirected=True,neg_sampling_method="sparse"):
     # Training phase
     model.train()
     total_train_loss = 0
@@ -204,8 +204,8 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
             edge_index=pos_edge_index, 
             num_nodes=batch.num_nodes, 
             num_neg_samples=pos_edge_index.size(1),
-            force_undirected=False,
-            method="sparse"
+            force_undirected=force_undirected,
+            method=neg_sampling_method
         ).to(device)
         
         z = model.encode(batch.x, batch.edge_index)
@@ -219,7 +219,7 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
     avg_train_loss = total_train_loss / len(train_loader)
     return avg_train_loss
 
-def validate(model,val_loader,device,variational=False):
+def validate(model,val_loader,device,variational=False,force_undirected=True,neg_sampling_method="sparse"):
     model.eval()
     total_val_loss = 0
     total_auc = 0
@@ -235,8 +235,8 @@ def validate(model,val_loader,device,variational=False):
                 edge_index=pos_edge_index, 
                 num_nodes=batch.num_nodes, 
                 num_neg_samples=pos_edge_index.size(1),
-                force_undirected=False,
-                method="sparse"
+                force_undirected=force_undirected,
+                method=neg_sampling_method
             ).to(device)
             
             z = model.encode(batch.x, batch.edge_index)

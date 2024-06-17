@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from ray import tune, train
 from ray.train import Checkpoint, RunConfig
-from ray.air import session
+from ray.air import session, config
 from ray.tune.schedulers import ASHAScheduler, HyperBandScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
 import torch
@@ -13,7 +13,7 @@ import torch_geometric.nn as pyg_nn
 from torch_geometric.nn import GraphSAGE, GCN, GCNConv, GraphConv
 from torch_geometric.loader import DataLoader
 
-from models.Graph.GraphAutoEncoder import Encoder, GraphEncoder
+from models.Graph.GraphAutoEncoder import Encoder, VariationalGCNEncoder
 from models.train import train_one_epoch, validate
 from models.Graph.GraphDataset import GraphDataset
 from utils.plot import plot_training_graphs
@@ -23,25 +23,28 @@ import tempfile
 def main(num_samples=100,max_num_epochs=50,gpus_per_trial=0.5):
 
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
-    model_name = "GAE_search_Pfhaler"
+    model_name = "GAE_search_architecture"
     work_dir = "/data/nsam947/Freshwater-Modelling"
-
+    trials_dir = os.path.join(storage_path, model_name)
+    # checkpoint_dir = os.path.join(trials_dir, "checkpoints")
     print("Current Working Directory:", os.getcwd())
 
     # Parameters to tune
     search_space = {
-        "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
+        # "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
+        # "batch_size": tune.choice([64, 128, 256,512,1024]),
+        # "num_layers": tune.choice([2,3,4,5]),
+        # "hidden_channels": tune.choice([16,32,64,128,256]),
+        # "out_channels": tune.choice([8,16,32]),
         "layer_type": tune.choice([GCNConv, GraphConv]),
-        "batch_size": tune.choice([64, 128, 256,512]),
-        "num_layers": tune.choice([2,3,4,5]),
-        "hidden_channels": tune.choice([16,32,64,128,256]),
-        "out_channels": tune.choice([8,16,32]),
         "embedding_dims":tune.choice([10,50,100,200]),
-        "scale_grad_by_freq":tune.choice([True,False])
+        "scale_grad_by_freq":tune.choice([True,False]),
+        "sample_edges":tune.choice(["dense","sparse"]),
+        "variational":tune.choice([True,False])
     }
 
     hyperopt_search = HyperOptSearch(metric="val_loss", mode="min")
-    # hyperband_scheduler = HyperBandScheduler(metric="val_loss", mode="min")
+
     # Define ASHA scheduler
     asha_scheduler = ASHAScheduler(
         metric="val_loss",
@@ -49,23 +52,40 @@ def main(num_samples=100,max_num_epochs=50,gpus_per_trial=0.5):
         max_t=max_num_epochs,   # Maximum number of training iterations
         # grace_period=1,         # DEBUG
         grace_period=5,         # Number of iterations before considering early stopping
-        reduction_factor=2      # Reduction factor for successive halving
+        reduction_factor=4,      # Reduction factor for successive halving
+        brackets=1
     )
 
-    # Run the tuning
-    tuner = tune.Tuner(
-        tune.with_resources(
-            tune.with_parameters(train_model),
-            resources={"cpu": 8, "gpu": gpus_per_trial}
-        ),
-        tune_config=tune.TuneConfig(
-            search_alg=hyperopt_search,  
-            scheduler=asha_scheduler,  
-            num_samples=num_samples,  # Adjust based on your budget
-        ),
-        param_space=search_space,
-        run_config=RunConfig(model_name,storage_path)
-    )
+
+    # Restore or run a new tuning
+    if tune.Tuner.can_restore(trials_dir):
+        tuner = tune.Tuner.restore(
+            trials_dir, 
+            trainable=tune.with_resources(
+                tune.with_parameters(train_model),
+                resources={"cpu": 8, "gpu": gpus_per_trial}
+            ), 
+            resume_errored=True,
+            param_space= search_space
+        )
+    else:
+        tuner = tune.Tuner(
+            trainable=tune.with_resources(
+                tune.with_parameters(train_model),
+                resources={"cpu": 8, "gpu": gpus_per_trial}
+            ),
+            tune_config=tune.TuneConfig(
+                search_alg=hyperopt_search,  
+                scheduler=asha_scheduler,  
+                num_samples=num_samples,  # Adjust based on your budget
+            ),
+            param_space=search_space,
+            run_config=RunConfig(
+                name=model_name,
+                storage_path=storage_path,
+                failure_config=config.FailureConfig(max_failures=-1)
+            )
+        )
 
     results = tuner.fit()
     best_result = results.get_best_result("val_loss", "min","all")
@@ -121,12 +141,13 @@ def train_model(config):
     lr = config.get("lr",0.001)
     layer_type = config.get("layer_type",GCNConv)
     batch_size = config.get("batch_size",128)
-    num_layers = config.get("num_layers",2)
-    out_channels=config.get("out_channels",8)
+    num_layers = config.get("num_layers",4)
+    out_channels=config.get("out_channels",16)
     hidden_channels = config.get("hidden_channels",2*out_channels)
-    embedding_dims = config.get("embedding_dims",10)
+    embedding_dims = config.get("embedding_dims",200)
     scale_grad_by_freq = config.get("scale_grad_by_freq",False)
-
+    sample_edges = config.get("sample_edges","sparse")
+    variational = config.get("variational",False)
 
 
 
@@ -147,7 +168,8 @@ def train_model(config):
     vocab_size = dataset.vocab_size
 
     # load model
-    model = pyg_nn.GAE(Encoder(in_channels,hidden_channels,out_channels,embedding_dim=embedding_dims,layers = num_layers, layer_type=layer_type, vocab_size=vocab_size,scale_grad_by_freq=scale_grad_by_freq))
+    encoder = Encoder(in_channels,hidden_channels,out_channels,embedding_dim=embedding_dims,layers = num_layers, layer_type=layer_type, vocab_size=vocab_size,scale_grad_by_freq=scale_grad_by_freq)
+    model = pyg_nn.VGAE(encoder) if variational else pyg_nn.GAE(encoder)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
 
@@ -168,10 +190,8 @@ def train_model(config):
 
     for epoch in range(start,50):
         # Train phase
-        avg_train_loss = train_one_epoch(model,optimizer,epoch,train_loader,device,searching=True)
-        
-        # Validation phase
-        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device)
+        avg_train_loss = train_one_epoch(model,optimizer,epoch,train_loader,device,searching=True,neg_sampling_method=sample_edges,variational=variational)
+        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,neg_sampling_method=sample_edges,variational=variational)
 
         metrics = {"loss": avg_train_loss, "val_loss": avg_val_loss, "auc":avg_auc,"ap":avg_ap}
         
