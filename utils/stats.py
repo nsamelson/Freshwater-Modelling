@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import unicodedata
 from matplotlib import pyplot as plt
@@ -6,6 +7,7 @@ import networkx as nx
 import xml.etree.ElementTree as ET
 import html
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import PowerTransformer, RobustScaler
 import torch
 from tqdm import tqdm
@@ -217,6 +219,53 @@ def test_different_feature_scalings():
     }
 
     plot.plot_multiple_distributions(big_numbers)
+
+
+def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
+    trial_histories = []
+    name = path.split("/")[-1]
+    try:
+        trial_paths = [os.path.join(path,trial) for trial in os.listdir(path) if os.path.isdir(os.path.join(path,trial))]
+        for _path in trial_paths:
+            files_list = os.listdir(_path)
+            if "progress.csv" in files_list:
+                params_dir = os.path.join(_path,"params.json")
+                progress_dir = os.path.join(_path,"progress.csv")
+
+                # Load params
+                with open(params_dir,"r") as f:
+                    params = json.load(f)
+                
+                # Load csv
+                results = pd.read_csv(progress_dir)
+                metrics_head = results.keys()[:4]
+
+                # generate history dict
+                history = {key:list(results[key]) for key in metrics_head}
+                history["params"] = params
+
+                trial_name = _path.split("/")[-1].split("_")[2]
+                history["trial_name"] = trial_name
+
+                trial_histories.append(history)
+
+    except Exception as e:
+        print(f"Couldn't extract data due to {e}")
+    
+    print(f" Found {len(trial_histories)} trials")
+
+    with open(os.path.join("trained_models",name,"history.json"),"r") as f:
+        best_trial= json.load(f)
+
+    try:
+        plot.plot_hyperparam_search(trial_histories,name,best_trial=best_trial)
+    except Exception as e:
+        print(f"Couldn't plot the HP search figure because of {e}")
+
+    try:
+        save.json_dump(f"trained_models/{name}/all_histories.json",trial_histories)
+    except Exception as e:
+        print(f"couldn't save the histories because of {e}")
 
 
 

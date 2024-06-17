@@ -4,6 +4,7 @@ import os
 from matplotlib import pyplot as plt
 import networkx as nx
 import numpy as np
+import pandas as pd
 from scipy import stats
 import seaborn as sns
 from scipy.stats import norm, gaussian_kde
@@ -331,3 +332,78 @@ def plot_multiple_distributions(arrays_dict={}):
     plt.tight_layout()
     # Save the figure
     plt.savefig('out/transformation_distributions.png')
+
+
+# Function to dynamically rename classes by extracting the last part of the class name
+def rename_classes_dynamic(df, class_columns):
+    for col in class_columns:
+        df[col] = df[col].apply(lambda x: x.split('.')[-1].strip(">'") if isinstance(x, str) and 'class' in x else x)
+    return df
+
+
+def plot_hyperparam_search(histories,name="search_plots",metrics=["auc", "ap", "val_loss"],scatter_params=["lr"],best_trial=None):
+    search_params = histories[0]["params"].keys()
+    processed_data = []
+
+    # Extract the parameters and their corresponding metrics
+    for entry in histories:
+        params = entry["params"]
+        best_run_idx = entry["val_loss"].index(min(entry["val_loss"]))
+        for metric in metrics:
+
+            processed_data.append({
+                "metric": metric,
+                "value": entry[metric][best_run_idx],
+                **params
+            })
+    df = pd.DataFrame(processed_data)
+
+    # Identify columns that contain class names
+    class_columns = [col for col in search_params if any(isinstance(val, str) and 'class' in val for val in df[col].unique())]
+    # Dynamically rename the class names in the DataFrame
+    df = rename_classes_dynamic(df, class_columns)
+
+    # Calculate the number of rows required (3 rows per hyperparameter)
+    num_cols = len(search_params)
+
+    # Create a figure to plot all subplots
+    fig, axes = plt.subplots(3, num_cols, figsize=(num_cols*2.5, num_cols))
+
+    # Plot each hyperparameter's metrics
+    for i, hyperparameter in enumerate(search_params):
+        for j, metric in enumerate(metrics):
+            ax = axes[j,i]
+
+
+            scatter = True if hyperparameter in scatter_params else False
+
+            if scatter:
+                sns.scatterplot(x=hyperparameter, y="value", hue="metric", data=df[df["metric"] == metric], ax=ax,)
+                ax.set_xscale("log")                
+            else:
+                sns.boxplot(x=hyperparameter, y="value", hue="metric", data=df[df["metric"] == metric], ax=ax, )
+
+
+            if best_trial is not None:
+                best_param = best_trial["params"][hyperparameter]
+                best_param = best_param.split('.')[-1].strip(">'") if isinstance(best_param, str) and 'class' in best_param else best_param
+                best_metric_idx = best_trial["val_loss"].index(min(best_trial["val_loss"]))
+                best_metric = best_trial[metric][best_metric_idx]
+                
+                # Add marker for best_param
+                ticks = [text.get_text() for text in ax.get_xticklabels()]
+                index = ticks.index(str(best_param)) if not scatter else best_param
+                ax.scatter(x=[index], y=[best_metric], marker="*", c="r",s=50, zorder=10)
+
+
+            # Add a single legend outside the plot
+            ax.set_xlabel(hyperparameter,fontsize=14) if j == len(metrics) - 1 else ax.set_xlabel("")
+            ax.set_ylabel(metric,fontsize=16) if i==0 else ax.set_ylabel("")                        
+            ax.legend().set_visible(False)
+    
+    plt.suptitle(f'Box plot of hyperparameter search',fontsize=22)
+    plt.tight_layout()
+
+    # Save the figure
+    plt.savefig(f'trained_models/{name}/hyperparameter_boxplots.png')
+        
