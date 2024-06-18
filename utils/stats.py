@@ -254,13 +254,13 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
     
     print(f" Found {len(trial_histories)} trials")
 
-    with open(os.path.join("trained_models",name,"history.json"),"r") as f:
-        best_trial= json.load(f)
+    # with open(os.path.join("trained_models",name,"history.json"),"r") as f:
+    #     best_trial= json.load(f)
 
-    try:
-        plot.plot_hyperparam_search(trial_histories,name,best_trial=best_trial)
-    except Exception as e:
-        print(f"Couldn't plot the HP search figure because of {e}")
+    # try:
+    #     plot.plot_hyperparam_search(trial_histories,name,best_trial=best_trial)
+    # except Exception as e:
+    #     print(f"Couldn't plot the HP search figure because of {e}")
 
     try:
         save.json_dump(f"trained_models/{name}/all_histories.json",trial_histories)

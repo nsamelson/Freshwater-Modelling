@@ -232,7 +232,6 @@ def plot_loss_graph(val_losses,train_losses, dir_path):
     plt.savefig(f'{dir_path}/loss_graph.png')
 
 def plot_training_graphs(history,dir_path):
-
     train_losses, val_losses, aucs, aps = history["loss"], history["val_loss"], history["auc"], history["ap"]
 
     epochs = range(1, len(train_losses) + 1)
@@ -341,14 +340,32 @@ def rename_classes_dynamic(df, class_columns):
     return df
 
 
-def plot_hyperparam_search(histories,name="search_plots",metrics=["auc", "ap", "val_loss"],scatter_params=["lr"],best_trial=None):
-    search_params = histories[0]["params"].keys()
+def plot_hyperparam_search(dir_path,metrics=["auc", "ap", "val_loss"],scatter_params=["lr"],filter_params=["num_epochs"], max_loss=1.2):
+    try:
+        with open(os.path.join(dir_path,"all_histories.json"),"r") as f:
+            histories = json.load(f)
+    except Exception as e:
+        print(f"couldn't load histories because of {e}")
+        return
+    try:
+        with open(os.path.join(dir_path,"history.json"),"r") as f:
+            best_trial = json.load(f)
+    except:
+        print(f"No best trial 'history.json' found under {dir_path}")
+        best_trial = None
+    
+    all_params = histories[0]["params"].keys()
+    search_params = [param for param in all_params if param not in filter_params]
     processed_data = []
 
     # Extract the parameters and their corresponding metrics
     for entry in histories:
         params = entry["params"]
         best_run_idx = entry["val_loss"].index(min(entry["val_loss"]))
+
+        # don't print data with loss bigger than the max specified
+        if entry["val_loss"][best_run_idx] > max_loss:
+            continue
         for metric in metrics:
 
             processed_data.append({
@@ -358,28 +375,23 @@ def plot_hyperparam_search(histories,name="search_plots",metrics=["auc", "ap", "
             })
     df = pd.DataFrame(processed_data)
 
-    # Identify columns that contain class names
+    # Identify columns that contain class names and rename them
     class_columns = [col for col in search_params if any(isinstance(val, str) and 'class' in val for val in df[col].unique())]
-    # Dynamically rename the class names in the DataFrame
     df = rename_classes_dynamic(df, class_columns)
-
-    # Calculate the number of rows required (3 rows per hyperparameter)
     num_cols = len(search_params)
 
     # Create a figure to plot all subplots
-    fig, axes = plt.subplots(3, num_cols, figsize=(num_cols*2.5, num_cols))
+    fig, axes = plt.subplots(len(metrics), num_cols, figsize=(num_cols*3, num_cols))
 
     # Plot each hyperparameter's metrics
     for i, hyperparameter in enumerate(search_params):
         for j, metric in enumerate(metrics):
             ax = axes[j,i]
-
-
             scatter = True if hyperparameter in scatter_params else False
 
             if scatter:
                 sns.scatterplot(x=hyperparameter, y="value", hue="metric", data=df[df["metric"] == metric], ax=ax,)
-                ax.set_xscale("log")                
+                ax.set_xscale("log")         
             else:
                 sns.boxplot(x=hyperparameter, y="value", hue="metric", data=df[df["metric"] == metric], ax=ax, )
 
@@ -401,9 +413,9 @@ def plot_hyperparam_search(histories,name="search_plots",metrics=["auc", "ap", "
             ax.set_ylabel(metric,fontsize=16) if i==0 else ax.set_ylabel("")                        
             ax.legend().set_visible(False)
     
-    plt.suptitle(f'Box plot of hyperparameter search',fontsize=22)
+    plt.suptitle(f'Hyperparameter search plot with {len(histories)} trials',fontsize=22)
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig(f'trained_models/{name}/hyperparameter_boxplots.png')
+    plt.savefig(os.path.join(dir_path,'hyperparameter_boxplots.png'))
         
