@@ -22,7 +22,7 @@ import torch_geometric.transforms as T
 from tqdm import tqdm
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Encoder, GraphEncoder, VariationalGCNEncoder
+from models.Graph.GraphAutoEncoder import Encoder
 import random
 from tensorboardX import SummaryWriter
 
@@ -208,7 +208,7 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
             method=neg_sampling_method
         ).to(device)
         
-        z = model.encode(batch.x, batch.edge_index)
+        z, _ = model.encode(batch.x, batch.edge_index)
         loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
@@ -239,7 +239,7 @@ def validate(model,val_loader,device,variational=False,force_undirected=True,neg
                 method=neg_sampling_method
             ).to(device)
             
-            z = model.encode(batch.x, batch.edge_index)
+            z, _ = model.encode(batch.x, batch.edge_index)
             loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()
