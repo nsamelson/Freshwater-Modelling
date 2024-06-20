@@ -1,8 +1,10 @@
 
 import argparse
-from preprocessing import xml2graph, test, tex2xml
+from preprocessing import xml2graph, tex2xml
+from preprocessing import test as test_prepro
 import utils.stats as stats
-from models import train, search
+import utils.plot as plot
+from models import train, search, test
 
 
 if __name__=="__main__":
@@ -27,7 +29,8 @@ if __name__=="__main__":
     if args.stats:
         # stats.xml_occurences()
         # stats.count_text_occurences_per_tag()
-        stats.extract_data_from_search()
+        # stats.extract_data_from_search()
+        plot.plot_hyperparam_search("trained_models/GAE_search_channel_dims")
 
     if args.train:
         train.main()
