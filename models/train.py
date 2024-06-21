@@ -44,7 +44,7 @@ import tempfile
 
 
 
-def main(model_name="GAE_best",epochs=200):
+def main(model_name="VGAE",epochs=200):
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
     trials_dir = os.path.join(storage_path, model_name)
@@ -57,6 +57,7 @@ def main(model_name="GAE_best",epochs=200):
         "model_name": model_name,
         "num_epochs": epochs,
         "lr": 1e-3,
+        "variational": True
     }
 
 
@@ -233,13 +234,13 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
     model.train()
     total_train_loss = 0
 
-    # Setup tqdm or not if searching
-    if searching:
-        batches = train_loader
-    else:
-        batches = tqdm(train_loader,desc=f"training epoch {epoch}",unit="batch")
+    # # Setup tqdm or not if searching
+    # if searching:
+    #     batches = train_loader
+    # else:
+    #     batches = tqdm(train_loader,desc=f"training epoch {epoch}",unit="batch")
     
-    for batch in batches:
+    for batch in train_loader:
         optimizer.zero_grad()
         batch = batch.to(device)
 
@@ -253,10 +254,12 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
             method=neg_sampling_method
         ).to(device)
         
-        z, _ = model.encode(batch.x, batch.edge_index)
+        z = model.encode(batch.x, batch.edge_index)
         loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
+
         loss.backward()
         optimizer.step()
         total_train_loss += loss.item()
@@ -284,13 +287,15 @@ def validate(model,val_loader,device,variational=False,force_undirected=True,neg
                 method=neg_sampling_method
             ).to(device)
             
-            z, _ = model.encode(batch.x, batch.edge_index)
+            z = model.encode(batch.x, batch.edge_index)
             loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()
-            total_val_loss += loss.item()
 
+            total_val_loss += loss.item()
             auc, ap = model.test(z, pos_edge_index, neg_edge_index)
+            
             total_auc += auc
             total_ap += ap    
 
