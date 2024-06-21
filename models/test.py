@@ -29,7 +29,7 @@ from tqdm import tqdm
 from models.train import validate
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Encoder
+from models.Graph.GraphAutoEncoder import Decoder, Encoder
 import random
 
 
@@ -40,7 +40,7 @@ import tempfile
 
 os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
-def main(model_name="GAE_best"):
+def main(model_name="VGAE"):
     dir_path = os.path.join("trained_models",model_name)
     params_path = os.path.join(dir_path,"params.json")
     model_path = os.path.join(dir_path,"checkpoint.pt")
@@ -93,6 +93,8 @@ def test_model(config:dict, model_path:str):
         batch_norm=config.get("batch_norm",False)
     )
 
+    # decoder = Decoder(encoder.embedding.weight.data)
+
     # Load model and weights
     model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
     model_state_data = torch.load(model_path)
@@ -115,7 +117,39 @@ def test_model(config:dict, model_path:str):
 
 
     # Visualise things
-    visualise_bottleneck(model,test_data, device)
+    # visualise_bottleneck(model,test_data, device)
+    reconstruct_graph(model,test_data[0],device, in_channels)
+
+
+def reconstruct_graph(model, graph, device, in_channels):
+    model.eval()
+    with torch.no_grad():
+        graph = graph.to(device)
+        z = model.encode(graph.x,graph.edge_index)
+        print("Latent space ",z, z.shape)
+
+        # Use the decoder to reconstruct edge probabilities
+        reconstructed_edges = model.decoder(z, graph.edge_index)
+        print(reconstructed_edges, reconstructed_edges.shape)
+
+        # Optionally, apply a sigmoid activation to get edge probabilities
+        reconstructed_probs = torch.sigmoid(reconstructed_edges)
+        print(reconstructed_probs, reconstructed_probs.shape)
+
+        # Threshold probabilities to obtain edge predictions
+        # edge_predictions = (reconstructed_probs > threshold).float()
+
+        # if model.variational:
+        #     z = model.reparameterize(z_mean, z_logstd)
+
+        # edge_probs = model.decode(z, graph.edge_index)
+        # print("Reconstructed edge probabilities", edge_probs, edge_probs.shape)
+        
+        # decoded_indices = model.encoder.find_nearest_embeddings(z)
+        # print("Decoded indices", decoded_indices, decoded_indices.shape)
+
+        # combined_features = torch.cat((graph.x[:, :-1], decoded_indices.unsqueeze(1).float()), dim=1)
+        # print("Combined features", combined_features, combined_features.shape)
 
 
 
