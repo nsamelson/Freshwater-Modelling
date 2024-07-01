@@ -31,7 +31,7 @@ from tqdm import tqdm
 from config import CONFIG
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Encoder
+from models.Graph.GraphAutoEncoder import GraphEncoder, GraphVAE, GraphDecoder
 import random
 # from tensorboardX import SummaryWriter
 
@@ -44,7 +44,7 @@ import tempfile
 
 
 
-def main(model_name="VGAE",epochs=200):
+def main(model_name="CustomVGAE",epochs=200):
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
     trials_dir = os.path.join(storage_path, model_name)
@@ -71,9 +71,7 @@ def main(model_name="VGAE",epochs=200):
         num_results=5,
         grace_period=grace_period,
         mode="min"
-    )
-
-    
+    )    
     trainer = TorchTrainer(
         train_loop_per_worker=train_model,
         train_loop_config=config,
@@ -162,24 +160,32 @@ def train_model(train_config: dict):
     train_data = dataset[:int(data_size * 0.8)]
     val_data = dataset[int(data_size * 0.8):int(data_size * 0.9)]
 
-    # Get channels for layers
-    in_channels = dataset.num_features
-    vocab_size = dataset.vocab_size
+    # Get config for models
+    embedding_dim = config.get("embedding_dims",200)
+    in_channels = dataset.num_features + embedding_dim - 1
+    hidden_channels=config.get("hidden_channels",32)
+    out_channels= config.get("out_channels",16)
+    layers = config.get("num_layers",4)
+    layer_type=config.get("layer_type",GCNConv)
+    sclae_grad_by_freq = config.get("scale_grad_by_freq",True)
 
-    # load model
-    encoder = Encoder(
-        in_channels,
-        hidden_channels=config.get("hidden_channels",32),
-        out_channels= config.get("out_channels",16),
-        layers = config.get("num_layers",4), 
-        embedding_dim=config.get("embedding_dims",200),
-        vocab_size=vocab_size,
-        scale_grad_by_freq=config.get("scale_grad_by_freq",True),
-        layer_type=config.get("layer_type",GCNConv), 
-        variational=config.get("variational",False),
-        batch_norm=config.get("batch_norm",False)
-    )
-    model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
+    # load models
+    encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
+    decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
+    # encoder = Encoder(
+    #     in_channels,
+    #     hidden_channels=config.get("hidden_channels",32),
+    #     out_channels= config.get("out_channels",16),
+    #     layers = config.get("num_layers",4), 
+    #     embedding_dim=config.get("embedding_dims",200),
+    #     vocab_size=vocab_size,
+    #     scale_grad_by_freq=config.get("scale_grad_by_freq",True),
+    #     layer_type=config.get("layer_type",GCNConv), 
+    #     variational=config.get("variational",False),
+    #     batch_norm=config.get("batch_norm",False)
+    # )
+    # model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
+    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, sclae_grad_by_freq)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
     model.to(device)
 
@@ -202,19 +208,25 @@ def train_model(train_config: dict):
     # TRAINING LOOP
     for epoch in range(start,config.get("num_epochs",500)):
         # Train phase
+        # avg_train_loss = train_one_epoch(
+        #     model,optimizer,epoch,train_loader,device,
+        #     searching=True,
+        #     neg_sampling_method=config.get("sample_edges","sparse"),
+        #     variational=config.get("variational",False),
+        #     force_undirected=config.get("force_undirected",True)
+        # )
         avg_train_loss = train_one_epoch(
-            model,optimizer,epoch,train_loader,device,
-            searching=True,
-            neg_sampling_method=config.get("sample_edges","sparse"),
+            model,optimizer,train_loader,device,
             variational=config.get("variational",False),
+            neg_sampling_method=config.get("sample_edges","sparse"),
             force_undirected=config.get("force_undirected",True)
         )
 
         # Validation phase
         avg_val_loss, avg_auc, avg_ap = validate(
             model,val_loader,device,
-            neg_sampling_method=config.get("sample_edges","sparse"),
             variational=config.get("variational",False),
+            neg_sampling_method=config.get("sample_edges","sparse"),
             force_undirected=config.get("force_undirected",True)
         )
 
@@ -229,16 +241,11 @@ def train_model(train_config: dict):
             session.report(metrics=metrics, checkpoint=Checkpoint.from_directory(tempdir))
 
 
-def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,variational=False,force_undirected=True,neg_sampling_method="sparse"):
+def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=False,force_undirected=True,neg_sampling_method="sparse"):
     # Training phase
     model.train()
     total_train_loss = 0
 
-    # # Setup tqdm or not if searching
-    # if searching:
-    #     batches = train_loader
-    # else:
-    #     batches = tqdm(train_loader,desc=f"training epoch {epoch}",unit="batch")
     
     for batch in train_loader:
         optimizer.zero_grad()
@@ -253,8 +260,9 @@ def train_one_epoch(model,optimizer,epoch,train_loader,device, searching=False,v
             force_undirected=force_undirected,
             method=neg_sampling_method
         ).to(device)
-        
-        z = model.encode(batch.x, batch.edge_index)
+
+        x = model.embed_x(batch.x)        
+        z = model.encode(x, batch.edge_index)
         loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
 
         if variational:
@@ -287,7 +295,8 @@ def validate(model,val_loader,device,variational=False,force_undirected=True,neg
                 method=neg_sampling_method
             ).to(device)
             
-            z = model.encode(batch.x, batch.edge_index)
+            x = model.embed_x(batch.x)        
+            z = model.encode(x, batch.edge_index)
             loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
 
             if variational:
