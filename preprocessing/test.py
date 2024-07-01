@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch_geometric.nn as pyg_nn
 import xml.etree.ElementTree as ET
-from models.Graph.GraphAutoEncoder import Encoder
+from models.Graph.GraphAutoEncoder import GraphEncoder
 from models.Graph.GraphDataset import GraphDataset
 from preprocessing.GraphEmbedder import GraphEmbedder
 from preprocessing.GraphBuilder import GraphBuilder
@@ -40,7 +40,7 @@ def main():
     in_features = dataset.num_features
     vocab_size = dataset.vocab_size
     print(in_features)
-    model = pyg_nn.GAE(Encoder(in_features, 32, 16,vocab_size=vocab_size,embedding_dim=10))
+    model = pyg_nn.GAE(GraphEncoder(in_features, 32, 16,vocab_size=vocab_size,embedding_dim=10))
 
     x= dataset[0].x
     edges = dataset[0].edge_index

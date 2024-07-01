@@ -15,7 +15,7 @@ from torch_geometric.nn import GraphSAGE, GCNConv, GraphConv
 from torch_geometric.loader import DataLoader
 
 from config import CONFIG
-from models.Graph.GraphAutoEncoder import Encoder
+from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
 from models.Graph.GraphDataset import GraphDataset
 from utils.plot import plot_training_graphs, plot_hyperparam_search

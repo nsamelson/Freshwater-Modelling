@@ -29,7 +29,7 @@ from tqdm import tqdm
 from models.train import validate
 from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
 from models.Graph.GraphDataset import GraphDataset
-from models.Graph.GraphAutoEncoder import Decoder, Encoder
+from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 import random
 
 
@@ -61,6 +61,7 @@ def test_model(config:dict, model_path:str):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    return
     # Set to device
     # device = 'cpu'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
