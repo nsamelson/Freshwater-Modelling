@@ -61,7 +61,7 @@ class GraphVAE(VGAE):
 
         return x_recon, e_recon
     
-    def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, alpha= 1, beta= 0):
+    def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, alpha = 1, beta = 0, gamma = 0):
         
         # Compute link loss
         adj_loss = self.recon_loss(z, pos_edge_index,neg_edge_index)

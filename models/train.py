@@ -44,7 +44,7 @@ import tempfile
 
 
 
-def main(model_name="GraphVAE_0",epochs=200):
+def main(model_name="GraphVAE_1",epochs=200):
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
     trials_dir = os.path.join(storage_path, model_name)
@@ -57,7 +57,9 @@ def main(model_name="GraphVAE_0",epochs=200):
         "model_name": model_name,
         "num_epochs": epochs,
         "lr": 1e-3,
-        "variational": True
+        "variational": True,
+        "alpha": 1,
+        "beta": 1
     }
 
 
@@ -220,20 +222,19 @@ def train_model(train_config: dict):
         #     variational=config.get("variational",False),
         #     force_undirected=config.get("force_undirected",True)
         # )
-        avg_train_loss = train_one_epoch(
-            model,optimizer,train_loader,device,
-            variational=config.get("variational",False),
-            neg_sampling_method=config.get("sample_edges","sparse"),
-            force_undirected=config.get("force_undirected",True)
-        )
+        avg_train_loss = train_one_epoch(model,optimizer,train_loader,device,config)
+        #     variational=config.get("variational",False),
+        #     neg_sampling_method=config.get("sample_edges","sparse"),
+        #     force_undirected=config.get("force_undirected",True)
+        # )
 
         # Validation phase
-        avg_val_loss, avg_auc, avg_ap = validate(
-            model,val_loader,device,
-            variational=config.get("variational",False),
-            neg_sampling_method=config.get("sample_edges","sparse"),
-            force_undirected=config.get("force_undirected",True)
-        )
+        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,config)
+        #     model,val_loader,device,
+        #     variational=config.get("variational",False),
+        #     neg_sampling_method=config.get("sample_edges","sparse"),
+        #     force_undirected=config.get("force_undirected",True)
+        # )
 
         metrics = {"loss": avg_train_loss, "val_loss": avg_val_loss, "auc":avg_auc,"ap":avg_ap}
         
@@ -246,11 +247,17 @@ def train_model(train_config: dict):
             session.report(metrics=metrics, checkpoint=Checkpoint.from_directory(tempdir))
 
 
-def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=False,force_undirected=True,neg_sampling_method="sparse"):
+def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # variational=False,force_undirected=True,neg_sampling_method="sparse"
     # Training phase
     model.train()
     total_train_loss = 0
 
+    # Getting params
+    variational = config.get("variational",False)
+    force_undirected = config.get("force_undirected",True)
+    neg_sampling_method = config.get("neg_sampling_method","sparse")
+    alpha = config.get("alpha",1)
+    beta = config.get("beta",0)
     
     for batch in train_loader:
         optimizer.zero_grad()
@@ -269,7 +276,7 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=Fa
         x = model.embed_x(batch.x)        
         z = model.encode(x, batch.edge_index)
         # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
-        loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index)
+        loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index,alpha,beta)
 
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
@@ -281,11 +288,18 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=Fa
     avg_train_loss = total_train_loss / len(train_loader)
     return avg_train_loss
 
-def validate(model:GraphVAE,val_loader,device,variational=False,force_undirected=True,neg_sampling_method="sparse"):
+def validate(model:GraphVAE,val_loader,device,config): # variational=False,force_undirected=True,neg_sampling_method="sparse"
     model.eval()
     total_val_loss = 0
     total_auc = 0
     total_ap = 0
+
+    # Getting params
+    variational = config.get("variational",False)
+    force_undirected = config.get("force_undirected",True)
+    neg_sampling_method = config.get("neg_sampling_method","sparse")
+    alpha = config.get("alpha",1)
+    beta = config.get("beta",0)
 
     with torch.no_grad():
         for batch in val_loader:
@@ -304,7 +318,7 @@ def validate(model:GraphVAE,val_loader,device,variational=False,force_undirected
             x = model.embed_x(batch.x)        
             z = model.encode(x, batch.edge_index)
             # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
-            loss = model.recon_full_loss(z,x,pos_edge_index, neg_edge_index)
+            loss = model.recon_full_loss(z,x,pos_edge_index, neg_edge_index,alpha,beta)
 
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()
