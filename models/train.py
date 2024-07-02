@@ -44,7 +44,7 @@ import tempfile
 
 
 
-def main(model_name="CustomVGAE",epochs=200):
+def main(model_name="GraphVAE_0",epochs=200):
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
     trials_dir = os.path.join(storage_path, model_name)
@@ -61,7 +61,7 @@ def main(model_name="CustomVGAE",epochs=200):
     }
 
 
-    grace_period = 10 if epochs != 1 else 1
+    grace_period = 15 if epochs != 1 else 1
 
     # ray.init()
     scaling_config = ScalingConfig(num_workers=1, use_gpu=True,trainer_resources={"CPU": 8}) # trainer_resources={"cpu":8}
@@ -110,6 +110,10 @@ def main(model_name="CustomVGAE",epochs=200):
         results = pd.read_csv(history_path)
         with open(params_path,"r") as f:
             params = json.load(f)
+        try:
+            params = params["train_loop_config"]
+        except:
+            pass
 
         metrics_head = results.keys()[:4]
         history = {key:list(results[key]) for key in metrics_head}
@@ -147,6 +151,7 @@ def train_model(train_config: dict):
     # load setup config and merge with training params
     config = CONFIG
     config.update(train_config)
+    print("Training Config: ", config)
 
     # Set to device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -167,7 +172,7 @@ def train_model(train_config: dict):
     out_channels= config.get("out_channels",16)
     layers = config.get("num_layers",4)
     layer_type=config.get("layer_type",GCNConv)
-    sclae_grad_by_freq = config.get("scale_grad_by_freq",True)
+    scale_grad_by_freq = config.get("scale_grad_by_freq",True)
 
     # load models
     encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
@@ -185,7 +190,7 @@ def train_model(train_config: dict):
     #     batch_norm=config.get("batch_norm",False)
     # )
     # model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
-    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, sclae_grad_by_freq)
+    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, scale_grad_by_freq)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
     model.to(device)
 
@@ -263,7 +268,8 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=Fa
 
         x = model.embed_x(batch.x)        
         z = model.encode(x, batch.edge_index)
-        loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+        # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+        loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index)
 
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
@@ -275,7 +281,7 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, variational=Fa
     avg_train_loss = total_train_loss / len(train_loader)
     return avg_train_loss
 
-def validate(model,val_loader,device,variational=False,force_undirected=True,neg_sampling_method="sparse"):
+def validate(model:GraphVAE,val_loader,device,variational=False,force_undirected=True,neg_sampling_method="sparse"):
     model.eval()
     total_val_loss = 0
     total_auc = 0
@@ -297,7 +303,8 @@ def validate(model,val_loader,device,variational=False,force_undirected=True,neg
             
             x = model.embed_x(batch.x)        
             z = model.encode(x, batch.edge_index)
-            loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+            # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
+            loss = model.recon_full_loss(z,x,pos_edge_index, neg_edge_index)
 
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()

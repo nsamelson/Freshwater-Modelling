@@ -11,7 +11,7 @@ from torch.nn import Module
 from torch import Tensor
 
 # MAX_LOGSTD = 10
-
+# EPS = 1e-15
 
 class GraphVAE(VGAE):
     def __init__(self, encoder: Module, decoder: Module, embedding_dim, num_embeddings, scale_grad_by_freq):
@@ -29,31 +29,51 @@ class GraphVAE(VGAE):
         new_x = torch.cat((one_hot,embedded),dim=1)
         return new_x
     
-    def reverse_embedding(self, decoded_features):
+    def reverse_embedding(self, x_recon):
         """
         Reverses the embedding process to find the index
         """
-        embedded_part = decoded_features[:, -self.embedding.embedding_dim:]
-        one_hot = decoded_features[:, :-self.embedding.embedding_dim]
+        embedded_part = x_recon[:, -self.embedding.embedding_dim:]
+        one_hot = x_recon[:, :-self.embedding.embedding_dim]
 
+        # Binary output to get the one-hot back
+        # one_hot = (torch.sigmoid(one_hot) > 0.5).float()
+        one_hot = (one_hot == one_hot.max(dim=-1, keepdim=True)[0]).float()
+        # one_hot = torch.zeros(one_hot.shape)
+
+        # Find the index back
         cosine_sim = F.cosine_similarity(embedded_part.unsqueeze(1), self.embedding.weight.unsqueeze(0), dim=2)
         decoded_indices = cosine_sim.argmax(dim=1)
- 
-        combined_features = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1)
-        
-        return combined_features
-    
-    def decode_all(self,z, edge_index, sigmoid):
-        e_recon = self.decoder(z, edge_index,sigmoid)
-        x_recon = self.decoder.node_decoder(z, edge_index)
-        decoded_features = self.reverse_embedding(x_recon)
 
-        return decoded_features, e_recon
+        # Combine the one-hot with the index
+        x_combined = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1).long()
+        
+        return x_combined
     
-    # TODO: Add a custom recon_loss maybe, and insert the node_feature loss inside of that : 
-    # if x_recon is not None and x is not None:
-    #     node_feature_loss = F.mse_loss(x_recon, x)
-    #     return edge_loss + node_feature_loss
+    def decode_all(self,z, edge_index, sigmoid=True):
+        e_recon = self.decoder(z, edge_index,sigmoid)
+        e_recon = (e_recon > 0.5).float()
+
+        x_recon = self.decoder.node_decoder(z, edge_index)
+        x_recon = self.reverse_embedding(x_recon)
+
+        # ef_recon = None # TODO: decode the edge features
+
+        return x_recon, e_recon
+    
+    def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, alpha= 1, beta= 0):
+        
+        # Compute link loss
+        adj_loss = self.recon_loss(z, pos_edge_index,neg_edge_index)
+
+        # Node features loss
+        feature_loss = F.mse_loss(x, self.decoder.node_decoder(z, pos_edge_index))
+
+        # Edge features loss
+        # edge_feat_loss = 0 # TODO: compute edge feature loss if not None
+
+        return alpha * adj_loss + beta * feature_loss
+
 
    
 
