@@ -40,7 +40,7 @@ import tempfile
 
 os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
-def main(model_name="VGAE"):
+def main(model_name="CustomVGAE"):
     dir_path = os.path.join("trained_models",model_name)
     params_path = os.path.join(dir_path,"params.json")
     model_path = os.path.join(dir_path,"checkpoint.pt")
@@ -61,7 +61,6 @@ def test_model(config:dict, model_path:str):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    return
     # Set to device
     # device = 'cpu'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -73,31 +72,27 @@ def test_model(config:dict, model_path:str):
 
     data_size = len(dataset)
     test_data = dataset[int(data_size * 0.9):]
-    test_loader = DataLoader(test_data, batch_size=config.get("batch_size",256), shuffle=False, num_workers=8)
+    test_loader = DataLoader(test_data, batch_size=10, shuffle=False, num_workers=8)
 
     # Get channels for layers
-    in_channels = dataset.num_features
-    vocab_size = dataset.vocab_size
+    embedding_dim = config.get("embedding_dims",200)
+    in_channels = dataset.num_features + embedding_dim - 1
+    hidden_channels=config.get("hidden_channels",32)
+    out_channels= config.get("out_channels",16)
+    layers = config.get("num_layers",4)
+    sclae_grad_by_freq = config.get("scale_grad_by_freq",True)
+    layer_type=config.get("layer_type",GCNConv)
+    layer_type = load_class_from_string(pyg_nn,layer_type)
 
     # load model
-    layer_type = load_class_from_string(pyg_nn,config.get("layer_type","GCNConv"))
-    encoder = Encoder(
-        in_channels,
-        hidden_channels=config.get("hidden_channels",32),
-        out_channels= config.get("out_channels",16),
-        layers = config.get("num_layers",4), 
-        embedding_dim=config.get("embedding_dims",200),
-        vocab_size=vocab_size,
-        scale_grad_by_freq=config.get("scale_grad_by_freq",True),
-        layer_type=layer_type, 
-        variational=config.get("variational",False),
-        batch_norm=config.get("batch_norm",False)
-    )
+    encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
+    decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
+    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, sclae_grad_by_freq)
 
     # decoder = Decoder(encoder.embedding.weight.data)
 
     # Load model and weights
-    model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
+    # model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
     model_state_data = torch.load(model_path)
     model.load_state_dict(model_state_data["model_state"])
     model.to(device)
@@ -105,11 +100,11 @@ def test_model(config:dict, model_path:str):
 
     # Evaluate on the test set
     # avg_val_loss, avg_auc, avg_ap = validate(
-    #     model,test_loader,device,
-    #     neg_sampling_method=config.get("sample_edges","sparse"),
-    #     variational=config.get("variational",False),
-    #     force_undirected=config.get("force_undirected",True)
-    # )
+    #         model,test_loader,device,
+    #         variational=config.get("variational",False),
+    #         neg_sampling_method=config.get("sample_edges","sparse"),
+    #         force_undirected=config.get("force_undirected",True)
+    #     )
     # metrics = {"test_loss": avg_val_loss, "auc":avg_auc,"ap":avg_ap}
     # print(f"Model performance on the test set: {metrics}")
 
@@ -119,23 +114,48 @@ def test_model(config:dict, model_path:str):
 
     # Visualise things
     # visualise_bottleneck(model,test_data, device)
-    reconstruct_graph(model,test_data[0],device, in_channels)
+    reconstruct_graph(model,test_loader,device, in_channels)
+
+def generate_all_possible_edges(num_nodes):
+    """Generate all possible edges for a graph with num_nodes nodes."""
+    row = torch.arange(num_nodes).repeat_interleave(num_nodes)
+    col = torch.arange(num_nodes).repeat(num_nodes)
+    edge_index = torch.stack([row, col], dim=0)
+    return edge_index
 
 
-def reconstruct_graph(model, graph, device, in_channels):
+def reconstruct_graph(model:GraphVAE, test_loader, device, in_channels):
     model.eval()
     with torch.no_grad():
-        graph = graph.to(device)
-        z = model.encode(graph.x,graph.edge_index)
-        print("Latent space ",z, z.shape)
+        for i,batch in enumerate(test_loader):
+            if i > 0:
+                break
+            graph = batch.to(device)
 
-        # Use the decoder to reconstruct edge probabilities
-        reconstructed_edges = model.decoder(z, graph.edge_index)
-        print(reconstructed_edges, reconstructed_edges.shape)
+            # Encodeing part
+            x = model.embed_x(graph.x)
+            z = model.encode(x,graph.edge_index)
 
-        # Optionally, apply a sigmoid activation to get edge probabilities
-        reconstructed_probs = torch.sigmoid(reconstructed_edges)
-        print(reconstructed_probs, reconstructed_probs.shape)
+            # Decoding part
+            edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
+            x_recon, e_recon = model.decode_all(z,edge_index,sigmoid=True)
+
+            print("Input graph nodes: ",graph.x, graph.x.shape)
+            print("Input graph edges: ",graph.edge_index, graph.edge_index.shape)
+            print("Latent space ",z, z.shape)
+            print("Output graph nodes: ",x_recon, x_recon.shape)
+            print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
+
+            # print(graph.x[:,-1])
+            # print(x_recon[:,-1])
+
+        # # Use the decoder to reconstruct edge probabilities
+        # reconstructed_edges = model.decoder(z, graph.edge_index)
+        # print(reconstructed_edges, reconstructed_edges.shape)
+
+        # # Optionally, apply a sigmoid activation to get edge probabilities
+        # reconstructed_probs = torch.sigmoid(reconstructed_edges)
+        # print(reconstructed_probs, reconstructed_probs.shape)
 
         # Threshold probabilities to obtain edge predictions
         # edge_predictions = (reconstructed_probs > threshold).float()
