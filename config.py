@@ -16,6 +16,9 @@ CONFIG = {
     "variational":False,
     "batch_norm":False,
     "force_undirected":True,
+    "alpha":1,
+    "beta":0,
+    "gamma":0,
 }
 
 MATHML_TAGS = [

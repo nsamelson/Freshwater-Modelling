@@ -179,20 +179,8 @@ def train_model(train_config: dict):
     # load models
     encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
     decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    # encoder = Encoder(
-    #     in_channels,
-    #     hidden_channels=config.get("hidden_channels",32),
-    #     out_channels= config.get("out_channels",16),
-    #     layers = config.get("num_layers",4), 
-    #     embedding_dim=config.get("embedding_dims",200),
-    #     vocab_size=vocab_size,
-    #     scale_grad_by_freq=config.get("scale_grad_by_freq",True),
-    #     layer_type=config.get("layer_type",GCNConv), 
-    #     variational=config.get("variational",False),
-    #     batch_norm=config.get("batch_norm",False)
-    # )
-    # model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
     model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, scale_grad_by_freq)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
     model.to(device)
 
@@ -214,27 +202,9 @@ def train_model(train_config: dict):
 
     # TRAINING LOOP
     for epoch in range(start,config.get("num_epochs",500)):
-        # Train phase
-        # avg_train_loss = train_one_epoch(
-        #     model,optimizer,epoch,train_loader,device,
-        #     searching=True,
-        #     neg_sampling_method=config.get("sample_edges","sparse"),
-        #     variational=config.get("variational",False),
-        #     force_undirected=config.get("force_undirected",True)
-        # )
-        avg_train_loss = train_one_epoch(model,optimizer,train_loader,device,config)
-        #     variational=config.get("variational",False),
-        #     neg_sampling_method=config.get("sample_edges","sparse"),
-        #     force_undirected=config.get("force_undirected",True)
-        # )
 
-        # Validation phase
+        avg_train_loss = train_one_epoch(model,optimizer,train_loader,device,config)
         avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,config)
-        #     model,val_loader,device,
-        #     variational=config.get("variational",False),
-        #     neg_sampling_method=config.get("sample_edges","sparse"),
-        #     force_undirected=config.get("force_undirected",True)
-        # )
 
         metrics = {"loss": avg_train_loss, "val_loss": avg_val_loss, "auc":avg_auc,"ap":avg_ap}
         
@@ -336,33 +306,6 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
     return avg_val_loss, avg_auc, avg_ap
 
 
-# def test_model(model,test_loader,device):
-#     color_list = ["red", "orange", "green", "blue", "purple", "brown"]
-#     colors = []
-#     embs = []
-
-
-#     model.eval()
-#     with torch.no_grad():
-#         for batch in test_loader:
-#             batch = batch.to(device)
-
-
-#             # Generate negative edges
-#             pos_edge_index = batch.edge_index
-#             neg_edge_index = negative_sampling(
-#                 edge_index=pos_edge_index, 
-#                 num_nodes=batch.num_nodes, 
-#                 num_neg_samples=pos_edge_index.size(1)
-#             ).to(device)
-            
-#             z = model.encode(batch.x, pos_edge_index)
-#             # pred = model.decode()
-#             # colors += [color_list[y] for y in labels]
-
-#     xs, ys = zip(*TSNE().fit_transform(z.cpu().detach().numpy()))
-#     plt.scatter(xs, ys, color=colors)
-#     plt.show()
 
     
 
