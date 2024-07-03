@@ -8,8 +8,8 @@ import plotly.express as px
 # from sklearn.linear_model import LogisticRegression
 # from sklearn.manifold import TSNE
 
-
-
+from torch_geometric.utils.convert import to_networkx, from_networkx 
+import networkx as nx
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -24,6 +24,7 @@ from torch_geometric.utils import negative_sampling
 from torch_geometric.loader import DataLoader
 import torch_geometric.nn as pyg_nn
 import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import tostring
 import torch_geometric.transforms as T
 from tqdm import tqdm
 from models.train import validate
@@ -40,7 +41,7 @@ import tempfile
 
 os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
-def main(model_name="CustomVGAE"):
+def main(model_name="GraphVAE_1"):
     dir_path = os.path.join("trained_models",model_name)
     params_path = os.path.join(dir_path,"params.json")
     model_path = os.path.join(dir_path,"checkpoint.pt")
@@ -72,7 +73,7 @@ def test_model(config:dict, model_path:str):
 
     data_size = len(dataset)
     test_data = dataset[int(data_size * 0.9):]
-    test_loader = DataLoader(test_data, batch_size=10, shuffle=False, num_workers=8)
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=8)
 
     # Get channels for layers
     embedding_dim = config.get("embedding_dims",200)
@@ -111,10 +112,23 @@ def test_model(config:dict, model_path:str):
     # print(test_loader.shape)
     
 
+   
 
     # Visualise things
     # visualise_bottleneck(model,test_data, device)
-    reconstruct_graph(model,test_loader,device, in_channels)
+    new_nodes, edges, old_nodes = reconstruct_graph(model,test_loader,device, in_channels)
+    new_graph = build_recon_graph(new_nodes, edges)
+    old_graph = build_recon_graph(old_nodes,edges)
+
+    # original equation
+    xml_root = graph_to_xml(old_graph)
+    tree = ET.ElementTree(xml_root)
+    tree.write("out/encoded_equation.xml", encoding="utf-8", xml_declaration=True)
+
+    # decoded equation
+    xml_root = graph_to_xml(new_graph)
+    tree = ET.ElementTree(xml_root)
+    tree.write("out/decoded_equation.xml", encoding="utf-8", xml_declaration=True)
 
 def generate_all_possible_edges(num_nodes):
     """Generate all possible edges for a graph with num_nodes nodes."""
@@ -123,28 +137,121 @@ def generate_all_possible_edges(num_nodes):
     edge_index = torch.stack([row, col], dim=0)
     return edge_index
 
+def graph_to_xml(G):
+    def create_xml_element(node_id, parent_element, visited):
+        if node_id in visited:
+            return
+        visited.add(node_id)
+
+        node_data = G.nodes[node_id]
+        tag = node_data['tag']
+        text = node_data.get('text', '')
+
+        # Create XML element
+        element = ET.SubElement(parent_element, tag)
+        if text:
+            element.text = text
+
+        # # Attach to parent element
+        # parent_element.append(element)
+
+        # Recursively create child elements
+        # children = [n for n in G[node_id]]
+        # print(children)
+        children = [n for n in G[node_id] if n not in visited]
+        for child_id in children:
+            create_xml_element(child_id, element, visited)
+
+    # Assuming the root node is node 0
+    root_data = G.nodes[0]
+    root = ET.Element(root_data['tag'], xmlns="http://www.w3.org/1998/Math/MathML")
+    if root_data.get('text'):
+        root.text = root_data['text']
+
+    visited = set()
+
+    # Recursively build the XML tree
+    for child_id in G[0]:
+        create_xml_element(child_id, root, visited)
+
+    return root
+
+
+
+def build_recon_graph(nodes, edges):
+    new_graph = nx.Graph()
+
+    # Get vocab
+    vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling","out/vocab_texts_katex.json")
+    with open(vocab_path,"r") as f:
+        vocab = json.load(f)
+
+    vocab_texts = list(vocab.keys())
+    
+    # Add nodes with features
+    for i, features in enumerate(nodes):
+        one_hot = features[:-1]
+        mathml_index = np.flatnonzero(one_hot)[0]
+        tag = MATHML_TAGS[mathml_index]
+
+        text = ""
+        if tag in ["mi","mo","mtext","mn"]:
+            vocab_index = features[-1]
+            text = vocab_texts[vocab_index]
+        
+
+        new_graph.add_node(i, tag=tag, text=text)
+
+    new_graph.add_edges_from(edges)
+
+    # print(new_graph.nodes(data=True))
+
+    return new_graph
 
 def reconstruct_graph(model:GraphVAE, test_loader, device, in_channels):
     model.eval()
+
+    equation_index = 420
     with torch.no_grad():
         for i,batch in enumerate(test_loader):
-            if i > 0:
-                break
-            graph = batch.to(device)
+            if i == equation_index:                
+                graph = batch.to(device)
+                edge_index = graph.edge_index
 
-            # Encodeing part
-            x = model.embed_x(graph.x)
-            z = model.encode(x,graph.edge_index)
+                # Encodeing part
+                x = model.embed_x(graph.x)
+                z = model.encode(x,edge_index)
 
-            # Decoding part
-            edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
-            x_recon, e_recon = model.decode_all(z,edge_index,sigmoid=True)
+                # Decoding part
+                # edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
+                x_recon, e_recon = model.decode_all(z,edge_index,sigmoid=True)
 
-            print("Input graph nodes: ",graph.x, graph.x.shape)
-            print("Input graph edges: ",graph.edge_index, graph.edge_index.shape)
-            print("Latent space ",z, z.shape)
-            print("Output graph nodes: ",x_recon, x_recon.shape)
-            print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
+                # print("Input graph nodes: ",graph.x, graph.x.shape)
+                # print("Input graph edges: ",edge_index, edge_index.shape)
+                # print("Latent space ",z, z.shape)
+                # print("Output graph nodes: ",x_recon, x_recon.shape)
+                # print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
+
+
+                x_recon = x_recon.cpu().numpy()
+                e_recon = e_recon.cpu().numpy()
+                
+
+                filtered_edge_index = edge_index[:, e_recon == 1]
+
+                edge_tuples = [(int(filtered_edge_index[0, i]), int(filtered_edge_index[1, i])) for i in range(filtered_edge_index.shape[1])]
+
+
+
+                return x_recon, edge_tuples, graph.x.cpu().numpy()   
+
+            
+
+            # print("New py_graph: ", new_pyg)
+            # print("New graph: ", new_graph)
+            # print(new_graph.edges())
+            # print(new_graph.nodes(data=True))
+
 
             # print(graph.x[:,-1])
             # print(x_recon[:,-1])
