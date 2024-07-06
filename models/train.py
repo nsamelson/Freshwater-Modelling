@@ -30,7 +30,7 @@ import torch_geometric.transforms as T
 from tqdm import tqdm
 from config import CONFIG
 # from preprocessing.GraphEmbedder import GraphEmbedder
-from models.Graph.GraphDataset import GraphDataset
+from preprocessing.GraphDataset import GraphDataset
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphVAE, GraphDecoder
 import random
 # from tensorboardX import SummaryWriter

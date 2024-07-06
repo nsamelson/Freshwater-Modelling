@@ -1,7 +1,7 @@
 
 import argparse
 from preprocessing import xml2graph, tex2xml
-from .tests import test_preprocessing as test_prepro
+from .tests import test_proprocessing as test_prepro
 import utils.stats as stats
 import utils.plot as plot
 from models import train, search, test
@@ -20,8 +20,8 @@ if __name__=="__main__":
 
     args = parser.parse_args()
 
-    if args.tex2xml:
-        tex2xml.main()
+    # if args.tex2xml:
+    #     tex2xml.main()
 
     # if args.xml2graph:
     #     xml2graph.main()
