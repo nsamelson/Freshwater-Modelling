@@ -15,15 +15,26 @@ import random
 # from torch_geometric.data import Data
 # import networkx as nx
 import unittest
+from preprocessing.MathmlDataset import MathmlDataset, DATASET_NAMES
+
+class Test_MathmlDataset(unittest.TestCase):
+
+    def setUp(self):
+        self.sets_to_test = ["OleehyO","sample"]
+        
 
 
+    def test_all_latex_sets(self):
+        # self.assertIsNotNone(self.dataset)
 
+        for testset in self.sets_to_test:
+            self.dataset = MathmlDataset("dataset/unit_test.xml",latex_set=testset, force_reload=True, debug=True)
 
-class Test_TestIncrementDecrement(unittest.TestCase):
-
-
-    def test_increment(self):
-        self.assertEqual(4,4)
+            self.assertIsNotNone(self.dataset, f"Dataset {testset} should not be None")
+            elements = list(self.dataset)
+            self.assertGreater(len(elements), 0, f"Dataset {testset} should contain elements")
+            for element in elements:
+                self.assertIn("math", element.tag, f"Element {testset} should be a MathML element")
 
 
 
