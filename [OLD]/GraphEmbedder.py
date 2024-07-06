@@ -9,40 +9,8 @@ import torch.nn as nn
 from torch_geometric.utils.convert import to_networkx, from_networkx
 from torch_geometric.data import DataLoader, Data
 from tqdm import tqdm
+from config import MATHML_TAGS
 
-MATHML_TAGS = [
-    "maction",
-    "math",
-    "menclose",
-    "merror", 
-    "mfenced",
-    "mfrac", 
-    "mglyph", 
-    "mi", 	
-    "mlabeledtr", 
-    "mmultiscripts", 
-    "mn",
-    "mo",
-    "mover", 	
-    "mpadded", 	
-    "mphantom", 	
-    "mroot", 	
-    "mrow", 
-    "ms", 	
-    "mspace",
-    "msqrt",
-    "mstyle",
-    "msub",
-    "msubsup",  
-    "msup",
-    "mtable",
-    "mtd",
-    "mtext",
-    "mtr",
-    "munder",
-    "munderover",
-    "semantics", 
-]
 
 
 

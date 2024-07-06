@@ -12,7 +12,7 @@ from torch_geometric.data import DataLoader, Data, Dataset
 from tqdm import tqdm
 # from utils.plot import plot_labels_frequency
 from utils import save, stats, plot
-from preprocessing.GraphEmbedder import GraphEmbedder
+from .GraphEmbedder import GraphEmbedder
 # import torch_geometric.nn as pyg_nn
 # import torch_geometric.utils as pyg_utils 
 # import torch_geometric.transforms as T

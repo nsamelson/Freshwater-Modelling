@@ -17,7 +17,7 @@ from torch_geometric.loader import DataLoader
 from config import CONFIG
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
-from models.Graph.GraphDataset import GraphDataset
+from preprocessing.GraphDataset import GraphDataset
 from utils.plot import plot_training_graphs, plot_hyperparam_search
 from utils.stats import extract_data_from_search
 from utils.save import json_dump

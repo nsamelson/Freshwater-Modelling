@@ -28,18 +28,19 @@ from xml.etree.ElementTree import tostring
 import torch_geometric.transforms as T
 from tqdm import tqdm
 from models.train import validate
-from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
-from models.Graph.GraphDataset import GraphDataset
+# from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
+from preprocessing.GraphDataset import GraphDataset
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 import random
 
+from config import MATHML_TAGS
 
 from utils.plot import plot_loss_graph, plot_training_graphs
 from utils.save import json_dump
 import pandas as pd
 import tempfile
 
-os.environ["OPENBLAS_NUM_THREADS"] = "128"
+# os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
 def main(model_name="GraphVAE_1"):
     dir_path = os.path.join("trained_models",model_name)

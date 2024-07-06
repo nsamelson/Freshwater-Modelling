@@ -5,7 +5,6 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv,GraphConv, InnerProductDecoder, BatchNorm, VGAE
 from torch_geometric.utils import from_networkx
 from torch_geometric.data import DataLoader, Data
-from preprocessing.GraphEmbedder import GraphEmbedder
 # from torch.nn import BatchNorm1d
 from torch.nn import Module
 from torch import Tensor
@@ -16,7 +15,6 @@ from torch import Tensor
 class GraphVAE(VGAE):
     def __init__(self, encoder: Module, decoder: Module, embedding_dim, num_embeddings, scale_grad_by_freq):
         super(GraphVAE, self).__init__(encoder, decoder)
-        # self.input_features = in_channels + embedding_dim - 1
         self.embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
 
     def embed_x(self,x) -> Tensor:

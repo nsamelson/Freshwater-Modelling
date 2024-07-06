@@ -1,7 +1,7 @@
 
 import argparse
 from preprocessing import xml2graph, tex2xml
-from preprocessing import test as test_prepro
+from .tests import test_preprocessing as test_prepro
 import utils.stats as stats
 import utils.plot as plot
 from models import train, search, test
@@ -23,8 +23,8 @@ if __name__=="__main__":
     if args.tex2xml:
         tex2xml.main()
 
-    if args.xml2graph:
-        xml2graph.main()
+    # if args.xml2graph:
+    #     xml2graph.main()
     
     if args.stats:
         # stats.xml_occurences()
