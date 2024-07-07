@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import torch
 from torch_geometric.data import Data, InMemoryDataset
 from tqdm import tqdm
@@ -183,16 +184,19 @@ class GraphDataset(InMemoryDataset):
 
         # Extract edge index
         edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
+        edge_features = torch.ones((edge_index.shape[1],)) #(edge_index.shape[1],1)
         if not G.is_directed():
             edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)
+            edge_features = torch.cat([edge_features, torch.zeros(edge_features.shape)],dim=0)
         
         # Create pytorch geometric graph
         py_g = Data(
             x=torch.tensor(x,dtype=torch.long),
             edge_index=edge_index,
+            edge_attr= edge_features,
             tag_index = torch.tensor(tags,dtype=torch.long),
             pos=torch.tensor(positions,dtype=torch.long),
-            nums = torch.tensor(nums,dtype=torch.float32)
+            nums = torch.tensor(nums,dtype=torch.float32),
         )
 
         return G, py_g
