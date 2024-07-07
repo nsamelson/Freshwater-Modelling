@@ -141,7 +141,7 @@ def rename_classes(config:dict):
 
 
 def train_model(train_config: dict):
-    seed_value = 0
+    seed_value = 42
     random.seed(seed_value)
     np.random.seed(seed_value)
     torch.manual_seed(seed_value)
@@ -149,6 +149,7 @@ def train_model(train_config: dict):
     torch.cuda.manual_seed_all(seed_value)  # if using multiple GPUs
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    generator = torch.Generator().manual_seed(seed_value)
 
     # load setup config and merge with training params
     config = CONFIG

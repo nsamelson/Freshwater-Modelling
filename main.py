@@ -1,10 +1,11 @@
 
 import argparse
-from preprocessing import MathmlDataset, VocabBuilder
+from preprocessing import MathmlDataset, VocabBuilder, GraphDataset
 # from .tests import test_proprocessing as test_prepro
 import utils.stats as stats
 import utils.plot as plot
 from models import train, search, test
+from torch.utils.data.dataset import random_split
 
 
 if __name__=="__main__":
@@ -21,8 +22,18 @@ if __name__=="__main__":
     args = parser.parse_args()
 
     if args.preprocess:
-        mathml = MathmlDataset.MathmlDataset("debug",latex_set="OleehyO",debug=True, force_reload=True)
-        vocab = VocabBuilder.VocabBuilder("debug",vocab_type="split", debug=True,reload_vocab=True,reload_xml_elements=True)
+        
+        xml_name = "debug"
+        mathml = MathmlDataset.MathmlDataset(xml_name,latex_set="OleehyO",debug=True, force_reload=False)
+        vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type="split", debug=True,reload_vocab=False,reload_xml_elements=False)
+
+        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=False, debug=True)
+
+        train,val, test = dataset.split()
+        print(train[0].x)
+        print(train.get_graph_list()[0].nodes(data=True))
+        # print(dataset.get_graph_list()[0])
+
 
 
     # if args.xml2graph:
