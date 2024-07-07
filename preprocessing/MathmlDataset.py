@@ -89,7 +89,7 @@ class MathmlDataset(Dataset):
     
     def process_data(self):
 
-        print("Loading dataset...")
+        print("Loading Latex dataset...")
         all_equations = self.load_latex()
 
         # Create the root element with the <span class="katex"> tag

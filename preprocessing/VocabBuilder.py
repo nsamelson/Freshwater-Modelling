@@ -99,6 +99,7 @@ class VocabBuilder():
         
 
     def process_xml_elements(self):
+        print("Loading XML...")
         tree = ET.parse(self.xml_path)
         root = tree.getroot()       
 

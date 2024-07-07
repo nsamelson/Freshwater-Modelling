@@ -21,6 +21,7 @@ if __name__=="__main__":
     parser.add_argument("-ln", "--latex_name", choices=["OleehyO","sample","Pfahler"], help="Name of the latex Set",default="OleehyO")
     parser.add_argument("-vn", "--vocab_name", choices=["concat","combined","split"], help="Name of the vocab method", default="concat")
     parser.add_argument("-xn", "--xml_name", help="Name of the xml dataset", default="default",)
+    parser.add_argument("-mn", "--model_name", help="Name of the model for training", default="default",)
     # Params
     parser.add_argument("-fr", "--force_reload", action="store_true", help="Default False. Force reload the preprocessing")
     parser.add_argument("-d", "--debug", action="store_true", help="Default False. debug")
@@ -33,15 +34,21 @@ if __name__=="__main__":
     vocab_type = args.vocab_name
     force_reload = args.force_reload
     debug = args.debug
+    model_name = args.model_name
 
 
     if args.preprocess:      
+        print("Starting preprocessing...")
         mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=force_reload)
         vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload, reload_xml_elements=force_reload)
         dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug)
+        print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
+        print(f"The generated dataset contains {len(dataset)} graphs")
+
+        print(dataset[0].edge_index, dataset[0].edge_attr)
 
     if args.train:
-        train.main()
+        train.main(model_name)
     
     if args.search:
         search.main()
