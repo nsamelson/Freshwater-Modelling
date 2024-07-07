@@ -71,7 +71,7 @@ class MathmlDataset(Dataset):
         root_path = os.path.join(ROOT_DIR,"data/pre_processed")
         
         self.xml_dir = os.path.join(root_path,xml_name)
-        self.xml_path = os.path.join(root_path,xml_name,"equations.xml")
+        self.xml_path = os.path.join(root_path,xml_name,"raw/equations.xml")
         self.latex_path = DATASET_NAMES.get(latex_set,None)
 
         if not os.path.exists(self.xml_dir):

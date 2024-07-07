@@ -26,7 +26,7 @@ class VocabBuilder():
         root_path = os.path.join(ROOT_DIR,"data/pre_processed")
 
         self.dir_path = os.path.join(root_path,xml_name)
-        self.xml_path = os.path.join(root_path,xml_name,"equations.xml")
+        self.xml_path = os.path.join(root_path,xml_name,"raw/equations.xml")
         self.vocab_path = os.path.join(root_path,xml_name,"vocab.json")
         self.element_dict_path = os.path.join(root_path,xml_name,"xml_elements.json")
 
