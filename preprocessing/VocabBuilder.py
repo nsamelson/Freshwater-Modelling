@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import html
 from tqdm import tqdm
 
-from config import MATHML_TAGS
+from config import MATHML_TAGS, ROOT_DIR
 
 
 VOCAB_TYPES = [
@@ -23,10 +23,12 @@ class VocabBuilder():
         self.debug = debug
         self.vocab_type = vocab_type if vocab_type in VOCAB_TYPES else "combined"
 
-        self.xml_path = os.path.join("data/pre_processed",xml_name,"equations.xml")
-        self.dir_path = os.path.join("data/pre_processed",xml_name)
-        self.vocab_path = os.path.join("data/pre_processed",xml_name,"vocab.json")
-        self.element_dict_path = os.path.join("data/pre_processed",xml_name,"xml_elements.json")
+        root_path = os.path.join(ROOT_DIR,"data/pre_processed")
+
+        self.dir_path = os.path.join(root_path,xml_name)
+        self.xml_path = os.path.join(root_path,xml_name,"equations.xml")
+        self.vocab_path = os.path.join(root_path,xml_name,"vocab.json")
+        self.element_dict_path = os.path.join(root_path,xml_name,"xml_elements.json")
 
         self.xml_elements = {tag:dict() for tag in MATHML_TAGS}
         self.vocab_table = {} # "":0,"<unk>":1

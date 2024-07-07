@@ -1,7 +1,7 @@
 
 import argparse
-from preprocessing import xml2graph, tex2xml
-from .tests import test_proprocessing as test_prepro
+from preprocessing import MathmlDataset, VocabBuilder
+# from .tests import test_proprocessing as test_prepro
 import utils.stats as stats
 import utils.plot as plot
 from models import train, search, test
@@ -9,7 +9,7 @@ from models import train, search, test
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-tx", "--tex2xml", action="store_true", help="Default False. Download Tex equations, convert to XML and save dataset")
+    parser.add_argument("-pr", "--preprocess", action="store_true", help="Default False. Download Tex equations, convert to XML and save dataset")
     parser.add_argument("-xg", "--xml2graph", action="store_true", help="Default False. Load XML, convert to graph and save dataset")
     parser.add_argument("-st", "--stats", action="store_true", help="Default False. Create stats")
     parser.add_argument("-te", "--test", action="store_true", help="Default False. Test things")
@@ -20,8 +20,10 @@ if __name__=="__main__":
 
     args = parser.parse_args()
 
-    # if args.tex2xml:
-    #     tex2xml.main()
+    if args.preprocess:
+        mathml = MathmlDataset.MathmlDataset("debug",latex_set="OleehyO",debug=True, force_reload=True)
+        vocab = VocabBuilder.VocabBuilder("debug",vocab_type="split", debug=True,reload_vocab=True,reload_xml_elements=True)
+
 
     # if args.xml2graph:
     #     xml2graph.main()

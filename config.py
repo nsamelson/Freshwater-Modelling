@@ -2,6 +2,9 @@
 from torch_geometric.nn import GraphSAGE, GCNConv, GraphConv
 
 
+
+ROOT_DIR = "/data/nsam947/Freshwater-Modelling/"
+
 CONFIG = {
     "lr": 1e-3,
     "num_epochs":1,

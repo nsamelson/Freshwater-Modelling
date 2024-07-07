@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from tqdm import tqdm
-
+from config import ROOT_DIR
 
 EXCLUDED_COMMANDS = [
     r"\\begin{align\*?}", r"\\end{align\*?}",  # align and align*
@@ -68,9 +68,11 @@ class MathmlDataset(Dataset):
         if self.latex_set is None:
             raise Exception("No Latex set found")
         
-        self.xml_path = os.path.join("data/pre_processed",xml_name,"equations.xml")
+        root_path = os.path.join(ROOT_DIR,"data/pre_processed")
+        
+        self.xml_dir = os.path.join(root_path,xml_name)
+        self.xml_path = os.path.join(root_path,xml_name,"equations.xml")
         self.latex_path = DATASET_NAMES.get(latex_set,None)
-        self.xml_dir = os.path.join("data/pre_processed",xml_name)
 
         if not os.path.exists(self.xml_dir):
             os.makedirs(self.xml_dir)
