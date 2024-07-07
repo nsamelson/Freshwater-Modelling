@@ -3,7 +3,7 @@ import torch
 from torch_geometric.data import Data, InMemoryDataset
 from tqdm import tqdm
 # from preprocessing.xml2graph import build_graph, convert_to_pyg
-from preprocessing.GraphBuilder import GraphBuilder
+from GraphBuilder import GraphBuilder
 # from preprocessing.GraphEmbedder import GraphEmbedder
 from utils.plot import plot_graph
 import xml.etree.ElementTree as ET

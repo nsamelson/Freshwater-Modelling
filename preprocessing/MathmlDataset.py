@@ -77,6 +77,10 @@ class MathmlDataset(Dataset):
         if not os.path.exists(self.xml_dir):
             os.makedirs(self.xml_dir)
 
+        raw_dir = os.path.join(self.xml_dir,"raw")
+        if not os.path.exists(raw_dir):
+            os.makedirs(raw_dir)
+
         if not os.path.exists(self.xml_path) or force_reload:
             self.process_data()
         else:
@@ -93,7 +97,7 @@ class MathmlDataset(Dataset):
         self.root = ET.Element("span", attrib={"class": "katex"})
 
         # Go through by batch and convert to XML
-        for i,batch in enumerate(tqdm(process_equations_in_batches(all_equations,self.batch_size), desc="Processing batches",unit="batch", total=int(len(all_equations)/self.batch_size))):
+        for i,batch in enumerate(tqdm(process_equations_in_batches(all_equations,self.batch_size), desc="Generating XML",unit=" batch", total=int(len(all_equations)/self.batch_size))):
             if self.debug and i>5:
                 break
 
@@ -119,6 +123,7 @@ class MathmlDataset(Dataset):
                     except Exception as e:
                         self.stats["error"] += 1
         # Save dataset
+        print("Saving XML...")
         tree = ET.ElementTree(self.root)
         tree.write(self.xml_path, encoding="utf-8", xml_declaration=True)
 

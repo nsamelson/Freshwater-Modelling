@@ -92,6 +92,7 @@ class VocabBuilder():
         
         
         # Save stuff
+        print("Saving Vocab...")
         with open(self.vocab_path,"w+") as f:
             json.dump(self.vocab_table,f)
         
@@ -120,12 +121,13 @@ class VocabBuilder():
                     find_in_element(child)
 
         # iterate over each XML equation
-        for i, formula in enumerate(tqdm(root,desc="processing xml equations",unit="equations")):
+        for i, formula in enumerate(tqdm(root,desc="Generating vocab",unit=" equations",total=len(root))):
             if self.debug and i>= 10000:
                 break
             # Run recursive function
             find_in_element(formula)
         
+        print("Saving xml elements...")
         with open(self.element_dict_path,"w+") as f:
             json.dump(self.xml_elements,f)
 

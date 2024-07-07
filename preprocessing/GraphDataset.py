@@ -60,7 +60,7 @@ class GraphDataset(InMemoryDataset):
         data_list = []
         graph_list = []
 
-        for i, formula in enumerate(tqdm(root, desc="Generating Graphs", unit="equations", total=len(root))):
+        for i, formula in enumerate(tqdm(root, desc="Generating Graphs", unit=" equations", total=len(root))):
             if self.debug and i>= 10:
                 break
             
@@ -74,6 +74,8 @@ class GraphDataset(InMemoryDataset):
         data, slices = self.collate(data_list)
         # torch.save((data, slices), self.processed_paths[0])
         self._graph_list = graph_list
+
+        print("Saving data...")
         torch.save((data, slices, graph_list), self.processed_paths[0])
 
     def split(self, train_ratio=0.8, val_ratio=0.1, shuffle= True):
