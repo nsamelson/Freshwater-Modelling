@@ -180,7 +180,7 @@ def train_model(train_config: dict):
     # load models
     encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
     decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, scale_grad_by_freq)
+    model = GraphVAE(encoder, decoder, dataset.vocab_size, embedding_dim, scale_grad_by_freq)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
     model.to(device)

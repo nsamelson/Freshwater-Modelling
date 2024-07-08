@@ -9,22 +9,139 @@ from torch_geometric.data import DataLoader, Data
 from torch.nn import Module
 from torch import Tensor
 
+from config import MATHML_TAGS
+
 # MAX_LOGSTD = 10
 # EPS = 1e-15
 
-class GraphVAE(VGAE):
-    def __init__(self, encoder: Module, decoder: Module, embedding_dim, num_embeddings, scale_grad_by_freq):
-        super(GraphVAE, self).__init__(encoder, decoder)
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
+EMBEDDINGS = [
+    "OHE_Concat",
+    "Embed_Concat",
+    "OHE_Tags_Embed_Combined",
+    "OHE_Tags_Embed_Split",
+    "MultiEmbed_Split",
+]
 
-    def embed_x(self,x) -> Tensor:
+class GraphVAE(VGAE):
+    def __init__(self, encoder: Module, decoder: Module, num_embeddings:int | dict, embedding_dim, embedding_method, scale_grad_by_freq):
+        """
+        Initializes the GraphVAE model.
+
+        Args:
+            encoder (Module): The encoder module.
+            decoder (Module): The decoder module.
+            embedding_dim (int): The dimension of the embeddings.
+            num_embeddings (int): The number of embeddings.
+            embedding_method (str): The method for embedding. Must be one of ["OHE_Concat", "Embed_Concat", "OHE_Tags_Embed_Combined", 
+                "OHE_Tags_Embed_Split", "MultiEmbed_Split"].
+            scale_grad_by_freq (bool): Whether to scale the gradient by the frequency of the words.
+        
+        Raises:
+            ValueError: If embedding_method is not one of the specified options.
+        """
+        super(GraphVAE, self).__init__(encoder, decoder)
+        self.num_embeddings = num_embeddings
+        self.embedding_method = embedding_method
+        self.embedding_dim = embedding_dim
+        self.scale_grad_by_freq = scale_grad_by_freq
+        # self.text_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
+        # self.tag_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
+        self.unknown_id = 1
+
+        if embedding_method not in EMBEDDINGS:
+            raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS}, but got {embedding_method}")
+
+    def embed_x(self,x, tag_index, pos=0, onehot=False) -> Tensor:
         """
         Embeds the index and concats to a new vector
         """
-        indices = x[:,-1].long() # making sure it's an integer
-        one_hot = x[:,:-1]
-        embedded = self.embedding(indices)
-        new_x = torch.cat((one_hot,embedded),dim=1)
+        if self.embedding_method == "OHE_Concat":
+            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim)
+            self.embedding.weight.data = torch.eye(self.num_embeddings)
+            # x = self.unknown_id if x >= self.num_embeddings else x
+            x = torch.where(x >= self.num_embeddings, torch.tensor(self.unknown_id, device=x.device), x)
+            new_x = self.embedding(x)
+
+        elif self.embedding_method == "Embed_Concat":
+            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            new_x = self.embedding(x)
+
+        elif self.embedding_method == "OHE_Tags_Embed_Combined":
+            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS))
+            self.tag_embedding.weight.data = torch.eye(len(MATHML_TAGS))
+            embedded_tag = self.tag_embedding(tag_index)
+
+            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            embedded_x = self.embedding(x)
+
+            new_x = torch.cat((embedded_tag,embedded_x),dim=1)
+
+        elif self.embedding_method == "OHE_Tags_Embed_Split":
+            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS))
+            self.tag_embedding.weight.data = torch.eye(len(MATHML_TAGS))
+            embedded_tag = self.tag_embedding(tag_index)
+
+
+            self.mi_embedding = nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mo_embedding = nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mtext_embedding = nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mn_embedding = nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+
+            # Create masks
+            mi_mask = (tag_index == MATHML_TAGS.index("mi"))
+            mo_mask = (tag_index == MATHML_TAGS.index("mo"))
+            mtext_mask = (tag_index == MATHML_TAGS.index("mtext"))
+            mn_mask = (tag_index == MATHML_TAGS.index("mn"))
+
+            # Initialize embeddings with zeros
+            embedded_mi = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mo = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mtext = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mn = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+
+
+            # Apply embeddings conditionally
+            embedded_mi[mi_mask] = self.mi_embedding(x[mi_mask])
+            embedded_mo[mo_mask] = self.mo_embedding(x[mo_mask])
+            embedded_mtext[mtext_mask] = self.mtext_embedding(x[mtext_mask])
+            embedded_mn[mn_mask] = self.mn_embedding(x[mn_mask])
+
+            new_x = torch.cat((embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn), dim=1)
+
+        elif self.embedding_method == "MultiEmbed_Split":
+            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            embedded_tag = self.tag_embedding(tag_index)
+
+            self.mi_embedding = nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mo_embedding = nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mtext_embedding = nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+            self.mn_embedding = nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+
+            # Create masks
+            mi_mask = (tag_index == MATHML_TAGS.index("mi"))
+            mo_mask = (tag_index == MATHML_TAGS.index("mo"))
+            mtext_mask = (tag_index == MATHML_TAGS.index("mtext"))
+            mn_mask = (tag_index == MATHML_TAGS.index("mn"))
+
+            # Initialize embeddings with zeros
+            embedded_mi = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mo = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mtext = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+            embedded_mn = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
+
+
+            # Apply embeddings conditionally
+            embedded_mi[mi_mask] = self.mi_embedding(x[mi_mask])
+            embedded_mo[mo_mask] = self.mo_embedding(x[mo_mask])
+            embedded_mtext[mtext_mask] = self.mtext_embedding(x[mtext_mask])
+            embedded_mn[mn_mask] = self.mn_embedding(x[mn_mask])
+
+            new_x = torch.stack([embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn], dim=0)
+
+        # indices = x[:,-1].long() # making sure it's an integer
+        # one_hot = x[:,:-1]
+        # embedded = self.embedding(indices)
+        # new_x = torch.cat((one_hot,embedded),dim=1)
         return new_x
     
     def reverse_embedding(self, x_recon):

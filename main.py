@@ -1,6 +1,11 @@
 
 import argparse
+
+import torch
 from preprocessing import MathmlDataset, VocabBuilder, GraphDataset
+from models.Graph.GraphAutoEncoder import GraphVAE, GraphEncoder, GraphDecoder
+from torch_geometric.nn import GraphSAGE, GCNConv, GraphConv
+
 # from .tests import test_proprocessing as test_prepro
 import utils.stats as stats
 import utils.plot as plot
@@ -45,7 +50,23 @@ if __name__=="__main__":
         print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
         print(f"The generated dataset contains {len(dataset)} graphs")
 
-        # print(dataset[0].edge_index, dataset[0].edge_attr)
+        # print(dataset[0].x, dataset[0].tag_index)
+        # print(vocab.shape())
+        graph = dataset[0]
+        print(graph)
+
+        embedding_dim = 42
+        encoder = GraphEncoder(embedding_dim,12,6,2,GCNConv)
+        decoder = GraphDecoder(embedding_dim,12,6,2,GCNConv)
+        model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,"MultiEmbed_Split" ,True)
+
+        x = model.embed_x(graph.x,graph.tag_index)
+        print(x, x.shape)
+        print(x[0])
+        print(x[-1])
+        # a = (x == 1).nonzero(as_tuple=False)
+        # print(a, a.shape)
+
 
     if args.train:
         train.main(model_name)
