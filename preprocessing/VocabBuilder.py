@@ -31,7 +31,7 @@ class VocabBuilder():
         self.element_dict_path = os.path.join(root_path,xml_name,"xml_elements.json")
 
         self.xml_elements = {tag:dict() for tag in MATHML_TAGS}
-        self.vocab_table = {} # "":0,"<unk>":1
+        self.vocab_table = {} 
 
         if not os.path.exists(self.xml_path):
             raise Exception("No XML found!")
@@ -57,39 +57,43 @@ class VocabBuilder():
                     indexed_vals[k] = index
                     index += 1
             return indexed_vals
-
+        
+        # COMBINED: merge everything in one big dict, don't differentiate between the tags, just keep the text
         if self.vocab_type == "combined":
-            self.vocab_table = {"":0,"<unk>":1} 
-
             # Flatten           
             flattened_dict = {}            
             for _, values in self.xml_elements.items():
                 flattened_dict.update(values)
             
             # put indices for each value, in descending order of freqs
+            self.vocab_table = {"":0,"<unk>":1} 
             self.vocab_table.update(index_vocab(flattened_dict,2))
+            # self.vocab_table["<unk>"] = len(self.vocab_table.keys())
 
+        # CONCAT: concatenate the tag with the text in form of "tag_text" or "tag" if text is empty
         elif self.vocab_type == "concat":
+            # Flatten           
             self.vocab_table = {"":0,"<unk>":1} 
             index = 2
-            # Flatten           
             flattened_dict = {}            
             for element, values in self.xml_elements.items():
-                concat_values = {"_".join([element,key]):value  for key,value in values.items()}
+                concat_values = {"_".join([element,key]):value  for key,value in values.items() if key!=""}
                 flattened_dict.update(concat_values)
                 self.vocab_table[element] = index
                 index +=1
 
             # put indices for each value, in descending order of freqs
             self.vocab_table.update(index_vocab(flattened_dict,index))
+            # self.vocab_table["<unk>"] = len(self.vocab_table.keys())
 
+        # SPLIT: Create 4 different dicts of text for the tags "mi","mo","mn","mtext"
         elif self.vocab_type == "split":
             for element, values in self.xml_elements.items():
                 if len(values.values())<= 1:
                     continue                
-                self.vocab_table[element] = {"":0,"<unk>":1} # if element != "mn" else {}
+                self.vocab_table[element] = {"":0, "<unk>":1} 
                 self.vocab_table[element].update(index_vocab(values,2))
-        
+                # self.vocab_table[element]["<unk>"] = len(self.vocab_table[element].keys())
         
         # Save stuff
         print("Saving Vocab...")

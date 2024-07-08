@@ -45,7 +45,7 @@ if __name__=="__main__":
         print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
         print(f"The generated dataset contains {len(dataset)} graphs")
 
-        print(dataset[0].edge_index, dataset[0].edge_attr)
+        # print(dataset[0].edge_index, dataset[0].edge_attr)
 
     if args.train:
         train.main(model_name)
