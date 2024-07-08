@@ -22,6 +22,12 @@ EMBEDDINGS = [
     "MultiEmbed_Split",
 ]
 
+METHODS = {
+    "onehot": ["concat","tag"],
+    "embed": ["tag","concat","combined","mi","mo","mtext","mn"],
+    "linear":["mn"]
+}
+
 class GraphVAE(VGAE):
     def __init__(self, encoder: Module, decoder: Module, num_embeddings:int | dict, embedding_dim, embedding_method, scale_grad_by_freq):
         """
@@ -43,7 +49,7 @@ class GraphVAE(VGAE):
         self.num_embeddings = num_embeddings
         self.embedding_method = embedding_method
         self.embedding_dim = embedding_dim
-        self.scale_grad_by_freq = scale_grad_by_freq
+        self.scale_grad = scale_grad_by_freq
         # self.text_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
         # self.tag_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
         self.unknown_id = 1
@@ -51,41 +57,80 @@ class GraphVAE(VGAE):
         if embedding_method not in EMBEDDINGS:
             raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS}, but got {embedding_method}")
 
+        # Generate embeddings
+        self.initialize_embeddings()
+        
+
+    def initialize_embeddings(self):
+        """
+        Initializes embeddings based on the specified embedding method.
+        """
+        if not hasattr(self, 'embeddings'):
+
+            if self.embedding_method in ["OHE_Tags_Embed_Split","MultiEmbed_Split",]:
+                self.embeddings = {
+                    "tag": nn.Embedding(len(MATHML_TAGS), self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                    "mi": nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                    "mo": nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                    "mtext": nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                    "mn": nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                }
+
+                if self.embedding_method == "OHE_Tags_Embed_Split":
+                    self.embeddings["tag"].weight.data = torch.eye(len(MATHML_TAGS))
+
+            elif self.embedding_method in ["OHE_Concat"]:
+                self.embeddings = {
+                    "concat": nn.Embedding(self.num_embeddings, self.embedding_dim),
+                }
+                self.embeddings["concat"].weight.data = torch.eye(self.num_embeddings)
+
+
+            elif self.embedding_method in ["Embed_Concat"]:
+                self.embeddings = {
+                    "concat": nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                }
+
+            elif self.embedding_method in ["OHE_Tags_Embed_Combined"]:
+                self.embeddings = {
+                    "tag": nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS)),
+                    "combined": nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
+                }
+                self.embeddings["tag"].weight.data = torch.eye(len(MATHML_TAGS))
+
+            
+
+
     def embed_x(self,x, tag_index, pos=0, onehot=False) -> Tensor:
         """
-        Embeds the index and concats to a new vector
+        Embeds the input index based on the specified embedding method and concatenates
+        it with other features to form a new vector.
+
+        Args:
+            x (Tensor): The input tensor to embed.
+            tag_index (Tensor): The tag indices corresponding to the input tensor.
+            pos (int, optional): Position index. Defaults to 0.
+            onehot (bool, optional): Whether to use one-hot encoding. Defaults to False.
+
+        Returns:
+            Tensor: The embedded and concatenated feature vector.
         """
         if self.embedding_method == "OHE_Concat":
-            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim)
-            self.embedding.weight.data = torch.eye(self.num_embeddings)
-            # x = self.unknown_id if x >= self.num_embeddings else x
+            # limits to the max size of the one-hot dimensions
             x = torch.where(x >= self.num_embeddings, torch.tensor(self.unknown_id, device=x.device), x)
-            new_x = self.embedding(x)
+            new_x = self.embeddings["concat"](x)
 
         elif self.embedding_method == "Embed_Concat":
-            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            new_x = self.embedding(x)
+            new_x = self.embedding["concat"](x)
 
         elif self.embedding_method == "OHE_Tags_Embed_Combined":
-            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS))
-            self.tag_embedding.weight.data = torch.eye(len(MATHML_TAGS))
-            embedded_tag = self.tag_embedding(tag_index)
-
-            self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            embedded_x = self.embedding(x)
+            embedded_tag = self.embeddings["tag"](tag_index)
+            embedded_x = self.embeddings["combined"](x)
 
             new_x = torch.cat((embedded_tag,embedded_x),dim=1)
 
-        elif self.embedding_method == "OHE_Tags_Embed_Split":
-            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS))
-            self.tag_embedding.weight.data = torch.eye(len(MATHML_TAGS))
-            embedded_tag = self.tag_embedding(tag_index)
-
-
-            self.mi_embedding = nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mo_embedding = nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mtext_embedding = nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mn_embedding = nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
+        elif self.embedding_method in ["OHE_Tags_Embed_Split","MultiEmbed_Split",]:
+            embedded_tag = self.embeddings["tag"](tag_index)
 
             # Create masks
             mi_mask = (tag_index == MATHML_TAGS.index("mi"))
@@ -101,47 +146,16 @@ class GraphVAE(VGAE):
 
 
             # Apply embeddings conditionally
-            embedded_mi[mi_mask] = self.mi_embedding(x[mi_mask])
-            embedded_mo[mo_mask] = self.mo_embedding(x[mo_mask])
-            embedded_mtext[mtext_mask] = self.mtext_embedding(x[mtext_mask])
-            embedded_mn[mn_mask] = self.mn_embedding(x[mn_mask])
+            embedded_mi[mi_mask] = self.embeddings["mi"](x[mi_mask])
+            embedded_mo[mo_mask] = self.embeddings["mo"](x[mo_mask])
+            embedded_mtext[mtext_mask] = self.embeddings["mtext"](x[mtext_mask])
+            embedded_mn[mn_mask] = self.embeddings["mn"](x[mn_mask])
 
-            new_x = torch.cat((embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn), dim=1)
+            if self.embedding_method == "OHE_Tags_Embed_Split":
+                new_x = torch.cat((embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn), dim=1)
+            else:
+                new_x = torch.stack([embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn], dim=1)
 
-        elif self.embedding_method == "MultiEmbed_Split":
-            self.tag_embedding = nn.Embedding(len(MATHML_TAGS), self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            embedded_tag = self.tag_embedding(tag_index)
-
-            self.mi_embedding = nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mo_embedding = nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mtext_embedding = nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-            self.mn_embedding = nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq= self.scale_grad_by_freq, padding_idx=0)
-
-            # Create masks
-            mi_mask = (tag_index == MATHML_TAGS.index("mi"))
-            mo_mask = (tag_index == MATHML_TAGS.index("mo"))
-            mtext_mask = (tag_index == MATHML_TAGS.index("mtext"))
-            mn_mask = (tag_index == MATHML_TAGS.index("mn"))
-
-            # Initialize embeddings with zeros
-            embedded_mi = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mo = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mtext = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mn = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-
-
-            # Apply embeddings conditionally
-            embedded_mi[mi_mask] = self.mi_embedding(x[mi_mask])
-            embedded_mo[mo_mask] = self.mo_embedding(x[mo_mask])
-            embedded_mtext[mtext_mask] = self.mtext_embedding(x[mtext_mask])
-            embedded_mn[mn_mask] = self.mn_embedding(x[mn_mask])
-
-            new_x = torch.stack([embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn], dim=0)
-
-        # indices = x[:,-1].long() # making sure it's an integer
-        # one_hot = x[:,:-1]
-        # embedded = self.embedding(indices)
-        # new_x = torch.cat((one_hot,embedded),dim=1)
         return new_x
     
     def reverse_embedding(self, x_recon):
