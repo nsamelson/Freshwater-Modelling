@@ -144,8 +144,13 @@ class VocabBuilder():
         with open(self.element_dict_path,"r") as f:
             self.xml_elements = json.load(f)
 
-    def __len__(self):
-        return len(self.vocab_table)
+    # def __len__(self):
+    def shape(self):
+
+        if self.vocab_type == "split":
+            return {key:len(vocab) for key,vocab in self.vocab_table.items()}
+        else:
+            return len(self.vocab_table)
 
     # def __getitem__(self, idx):
     #     return self.vocab_table[idx] # might be confusing!!!

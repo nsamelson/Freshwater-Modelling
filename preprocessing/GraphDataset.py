@@ -161,6 +161,7 @@ class GraphDataset(InMemoryDataset):
                 tag = rn(child.tag)
                 text = "" if child.text is None else clean_text(child.text)
                 index, tag_index = self.get_index_from_vocab(tag,text)
+                pos = max(i,255)
                 
                 num = -1
                 if tag == "mn":
@@ -168,10 +169,11 @@ class GraphDataset(InMemoryDataset):
                         num = float(text)
                     except:
                         return None
+                    
 
                 # Add new node and edge between himself and the parent
-                G.add_node(uid, tag=tag, text=text,pos=i, index=index, num=num)
-                add_to_list(index,tag_index,pos=i,num=num)
+                G.add_node(uid, tag=tag, text=text,pos=pos, index=index, num=num)
+                add_to_list(index,tag_index,pos=pos,num=num)
                 G.add_edge(parent_uid, uid)
                 uid += 1
 
