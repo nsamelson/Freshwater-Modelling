@@ -23,9 +23,11 @@ EMBEDDINGS = [
 ]
 
 METHODS = {
-    "onehot": ["concat","tag"],
+    "onehot": ["concat","tag","pos"],
     "embed": ["tag","concat","combined","mi","mo","mtext","mn"],
-    "linear":["mn"]
+    "linear":["mn"],
+    "stack": False,
+    "scale": ["log"],
 }
 
 class GraphVAE(VGAE):
@@ -50,12 +52,10 @@ class GraphVAE(VGAE):
         self.embedding_method = embedding_method
         self.embedding_dim = embedding_dim
         self.scale_grad = scale_grad_by_freq
-        # self.text_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
-        # self.tag_embedding = nn.Embedding(num_embeddings, embedding_dim, scale_grad_by_freq= scale_grad_by_freq, padding_idx=0)
         self.unknown_id = 1
 
-        if embedding_method not in EMBEDDINGS:
-            raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS}, but got {embedding_method}")
+        # if embedding_method not in EMBEDDINGS:
+        #     raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS}, but got {embedding_method}")
 
         # Generate embeddings
         self.initialize_embeddings()
@@ -66,42 +66,39 @@ class GraphVAE(VGAE):
         Initializes embeddings based on the specified embedding method.
         """
         if not hasattr(self, 'embeddings'):
+            self.embeddings = {}
 
-            if self.embedding_method in ["OHE_Tags_Embed_Split","MultiEmbed_Split",]:
-                self.embeddings = {
-                    "tag": nn.Embedding(len(MATHML_TAGS), self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                    "mi": nn.Embedding(self.num_embeddings["mi"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                    "mo": nn.Embedding(self.num_embeddings["mo"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                    "mtext": nn.Embedding(self.num_embeddings["mtext"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                    "mn": nn.Embedding(self.num_embeddings["mn"], self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                }
+            if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
+                for vocab in self.embedding_method["onehot"]:
+                    if vocab == "tag":
+                        input_dims = len(MATHML_TAGS)
+                    elif vocab == "pos":
+                        input_dims = 256
+                    else:
+                        input_dims = self.embedding_dim
 
-                if self.embedding_method == "OHE_Tags_Embed_Split":
-                    self.embeddings["tag"].weight.data = torch.eye(len(MATHML_TAGS))
+                    self.embeddings[vocab] = nn.Embedding(input_dims, input_dims)
+                    self.embeddings[vocab].weight.data = torch.eye(input_dims)
 
-            elif self.embedding_method in ["OHE_Concat"]:
-                self.embeddings = {
-                    "concat": nn.Embedding(self.num_embeddings, self.embedding_dim),
-                }
-                self.embeddings["concat"].weight.data = torch.eye(self.num_embeddings)
+            if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
+                for vocab in self.embedding_method["embed"]:
+                    if vocab == "tag":
+                        input_dims = len(MATHML_TAGS) 
+                    elif vocab in ["concat","combined"]:
+                        input_dims = self.num_embeddings
+                    elif vocab in ["mi","mn","mtext","mo"]:
+                        input_dims = self.num_embeddings[vocab]
+                    else:
+                        raise ValueError(f"Invalid vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
+                    self.embeddings[vocab] = nn.Embedding(input_dims, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0)
 
-
-            elif self.embedding_method in ["Embed_Concat"]:
-                self.embeddings = {
-                    "concat": nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                }
-
-            elif self.embedding_method in ["OHE_Tags_Embed_Combined"]:
-                self.embeddings = {
-                    "tag": nn.Embedding(len(MATHML_TAGS), len(MATHML_TAGS)),
-                    "combined": nn.Embedding(self.num_embeddings, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0),
-                }
-                self.embeddings["tag"].weight.data = torch.eye(len(MATHML_TAGS))
-
-            
+            if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
+                for vocab in self.embedding_method["linear"]:
+                    self.embeddings[vocab] = nn.Linear(1,self.embedding_dim)
 
 
-    def embed_x(self,x, tag_index, pos=0, onehot=False) -> Tensor:
+
+    def embed_x(self,x:Tensor, tag_index:Tensor, pos:Tensor, nums:Tensor) -> Tensor:
         """
         Embeds the input index based on the specified embedding method and concatenates
         it with other features to form a new vector.
@@ -109,54 +106,64 @@ class GraphVAE(VGAE):
         Args:
             x (Tensor): The input tensor to embed.
             tag_index (Tensor): The tag indices corresponding to the input tensor.
-            pos (int, optional): Position index. Defaults to 0.
-            onehot (bool, optional): Whether to use one-hot encoding. Defaults to False.
+            pos (Tensor): Position indices.
+            num (Tensor): Numerical values to embed.
 
         Returns:
             Tensor: The embedded and concatenated feature vector.
         """
-        if self.embedding_method == "OHE_Concat":
-            # limits to the max size of the one-hot dimensions
-            x = torch.where(x >= self.num_embeddings, torch.tensor(self.unknown_id, device=x.device), x)
-            new_x = self.embeddings["concat"](x)
+        embedded = []
 
-        elif self.embedding_method == "Embed_Concat":
-            new_x = self.embedding["concat"](x)
+        if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
+            for vocab in self.embedding_method["onehot"]:
+                if vocab == "tag":
+                    embedded.append(self.embeddings["tag"](tag_index))
+                elif vocab == "concat":
+                    x = torch.where(x >= self.embedding_dim, torch.tensor(self.unknown_id, device=x.device), x)
+                    embedded.append(self.embeddings["concat"](x))
+                elif vocab == "pos":
+                    embedded.append(self.embeddings["pos"](pos))
+                else:
+                    raise ValueError(f"Invalid one-hot vocab selected. Expected one of {METHODS['onehot']}, but got {vocab}")
 
-        elif self.embedding_method == "OHE_Tags_Embed_Combined":
-            embedded_tag = self.embeddings["tag"](tag_index)
-            embedded_x = self.embeddings["combined"](x)
+        if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
+            for vocab in self.embedding_method["embed"]:
+                if vocab == "tag":
+                    embedded.append(self.embeddings["tag"](tag_index))
+                elif vocab in ["concat","combined"]:
+                    embedded.append(self.embeddings[vocab](x))
+                elif vocab in ["mi","mn","mtext","mo"]:
+                    mask = (tag_index == MATHML_TAGS.index(vocab))
+                    vector = torch.zeros(x.size(0),self.embedding_dim, dtype=torch.float32, device=x.device) #.unsqueeze(1).repeat(1, self.embedding_dim)
+                    vector[mask] = self.embeddings[vocab](x[mask])
+                    embedded.append(vector)
+                else:
+                    raise ValueError(f"Invalid embed vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
 
-            new_x = torch.cat((embedded_tag,embedded_x),dim=1)
+        if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
+                for vocab in self.embedding_method["linear"]:
+                    mask = (nums != -1)
+                    nums[mask] = self.feature_scale(nums[mask])
+                    vector = torch.zeros(x.size(0), self.embedding_dim, dtype=torch.float32, device=x.device)
+                    vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1))
+                    embedded.append(vector)
 
-        elif self.embedding_method in ["OHE_Tags_Embed_Split","MultiEmbed_Split",]:
-            embedded_tag = self.embeddings["tag"](tag_index)
-
-            # Create masks
-            mi_mask = (tag_index == MATHML_TAGS.index("mi"))
-            mo_mask = (tag_index == MATHML_TAGS.index("mo"))
-            mtext_mask = (tag_index == MATHML_TAGS.index("mtext"))
-            mn_mask = (tag_index == MATHML_TAGS.index("mn"))
-
-            # Initialize embeddings with zeros
-            embedded_mi = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mo = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mtext = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-            embedded_mn = torch.zeros_like(x, dtype=torch.float32, device=x.device).unsqueeze(1).repeat(1, self.embedding_dim)
-
-
-            # Apply embeddings conditionally
-            embedded_mi[mi_mask] = self.embeddings["mi"](x[mi_mask])
-            embedded_mo[mo_mask] = self.embeddings["mo"](x[mo_mask])
-            embedded_mtext[mtext_mask] = self.embeddings["mtext"](x[mtext_mask])
-            embedded_mn[mn_mask] = self.embeddings["mn"](x[mn_mask])
-
-            if self.embedding_method == "OHE_Tags_Embed_Split":
-                new_x = torch.cat((embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn), dim=1)
-            else:
-                new_x = torch.stack([embedded_tag, embedded_mi, embedded_mo, embedded_mtext, embedded_mn], dim=1)
+        # Stack to form a 3D vector, else concats to keep 2D shape
+        if "stack" in self.embedding_method and self.embedding_method["stack"] == True:
+            new_x = torch.stack(embedded, dim=1)
+        else:
+            new_x = torch.cat(embedded,dim=1) # if len(embedded) > 1 else embedded[0]
 
         return new_x
+    
+    def feature_scale(self, nums):
+        scaling = self.embedding_method["scale"]
+
+        if scaling in METHODS["scale"]:
+            if scaling == "log":
+                return torch.log10(torch.clamp(nums, min=1e-6) + 1e-7)
+        else:
+            raise ValueError(f"Invalid feature scaling. Expected one of {METHODS['scale']}, but got {scaling}")
     
     def reverse_embedding(self, x_recon):
         """

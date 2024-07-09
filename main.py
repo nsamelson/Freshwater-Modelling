@@ -53,17 +53,25 @@ if __name__=="__main__":
         # print(dataset[0].x, dataset[0].tag_index)
         # print(vocab.shape())
         graph = dataset[0]
-        print(graph)
+        print(graph.nums)
 
-        embedding_dim = 42
+        embedding_dim = 10
+        method = {
+            "onehot": [],
+            "embed": ["tag","mi","mo","mtext",], # "mi","mo","mtext","mn"
+            "linear": ["mn"],
+            "stack": False,
+            "scale": "log"
+        }
         encoder = GraphEncoder(embedding_dim,12,6,2,GCNConv)
         decoder = GraphDecoder(embedding_dim,12,6,2,GCNConv)
-        model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,"MultiEmbed_Split" ,True)
-
-        x = model.embed_x(graph.x,graph.tag_index)
+        model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,True)
+        
+        x = model.embed_x(graph.x,graph.tag_index, graph.pos, graph.nums)
         print(x, x.shape)
-        print(x[0])
-        print(x[-1])
+        print(x[9])
+        print(x[17])
+        # print(x[-1])
         # a = (x == 1).nonzero(as_tuple=False)
         # print(a, a.shape)
 
