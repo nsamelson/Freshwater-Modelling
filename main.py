@@ -1,6 +1,8 @@
 
 import argparse
+import random
 
+import numpy as np
 import torch
 from preprocessing import MathmlDataset, VocabBuilder, GraphDataset
 from models.Graph.GraphAutoEncoder import GraphVAE, GraphEncoder, GraphDecoder
@@ -42,6 +44,15 @@ if __name__=="__main__":
     model_name = args.model_name
 
 
+    seed_value = 42
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    torch.cuda.manual_seed(seed_value)
+    torch.cuda.manual_seed_all(seed_value)  # if using multiple GPUs
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     if args.preprocess:      
         print("Starting preprocessing...")
         mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=force_reload)
@@ -52,25 +63,43 @@ if __name__=="__main__":
 
         # print(dataset[0].x, dataset[0].tag_index)
         # print(vocab.shape())
-        graph = dataset[0]
+        graph = dataset[1]
         print(graph.nums)
 
-        embedding_dim = 10
+        embedding_dim = 256
         method = {
-            "onehot": [],
-            "embed": ["tag","mi","mo","mtext",], # "mi","mo","mtext","mn"
-            "linear": ["mn"],
-            "stack": False,
+            "onehot": ["concat"],
+            "embed": [], # "mi","mo","mtext","mn"
+            "linear": [],
             "scale": "log"
         }
-        encoder = GraphEncoder(embedding_dim,12,6,2,GCNConv)
-        decoder = GraphDecoder(embedding_dim,12,6,2,GCNConv)
+        encoder = GraphEncoder(embedding_dim,64,16,2,GCNConv)
+        decoder = GraphDecoder(embedding_dim,64,16,2,GCNConv)
         model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,True)
         
         x = model.embed_x(graph.x,graph.tag_index, graph.pos, graph.nums)
-        print(x, x.shape)
-        print(x[9])
-        print(x[17])
+        print(x.shape, graph.edge_index.shape, graph.edge_attr.shape)
+        print(graph.edge_attr)
+
+        z = model.encode(x, graph.edge_index, graph.edge_attr)
+        print(z.shape)
+
+        x_p = model.decoder.node_decoder(z,graph.edge_index, graph.edge_attr)
+        print(x_p.shape)
+
+        edge_recon = model.decoder.edge_features_decoder(z,graph.edge_index)
+        print(edge_recon, edge_recon.shape)
+
+        loss = model.recon_full_loss(z, x, graph.edge_index, None, graph.edge_attr, 1,1, 1)
+        loss = loss + (1 / graph.num_nodes) * model.kl_loss()
+        print(loss)
+
+        print(model.calculate_accuracy(z,x,graph.edge_index,graph.edge_attr))
+
+        # print(x, x.shape)
+        # print(x[9])
+        # print(x[17])
+
         # print(x[-1])
         # a = (x == 1).nonzero(as_tuple=False)
         # print(a, a.shape)

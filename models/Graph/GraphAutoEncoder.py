@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv,GraphConv, InnerProductDecoder, BatchNorm, VGAE
+from torch_geometric.nn import GCNConv,GraphConv, InnerProductDecoder, BatchNorm, VGAE, MessagePassing
 from torch_geometric.utils import from_networkx
 from torch_geometric.data import DataLoader, Data
 # from torch.nn import BatchNorm1d
@@ -26,12 +26,85 @@ METHODS = {
     "onehot": ["concat","tag","pos"],
     "embed": ["tag","concat","combined","mi","mo","mtext","mn"],
     "linear":["mn"],
-    "stack": False,
     "scale": ["log"],
 }
 
+
+class GraphEncoder(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels=32, out_channels=16, layers:int=4,layer_type=GCNConv, batch_norm=False):
+        super(GraphEncoder, self).__init__()
+        self.convs = nn.ModuleList()
+        self.batch_norms = nn.ModuleList() if batch_norm else None
+
+        # Create as many layers as wanted, minimum # is 2
+        for i in range(layers - 1):
+            channels = in_channels if i == 0 else hidden_channels
+            self.convs.append(layer_type(channels,hidden_channels))
+            if batch_norm:
+                self.batch_norms.append(BatchNorm(hidden_channels))
+        
+        # Last 2 layers in parallel
+        self.conv_mu = layer_type(hidden_channels, out_channels)
+        self.conv_logstd = layer_type(hidden_channels,out_channels)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        for i, layer in enumerate(self.convs):
+            x = layer(x, edge_index, edge_weight).relu()  # GCN
+            if self.batch_norms is not None:
+                x = self.batch_norms[i](x)  # Batch Norm
+        
+        mu = self.conv_mu(x, edge_index, edge_weight)
+        logstd = self.conv_logstd(x, edge_index, edge_weight)
+
+        return mu, logstd
+    
+class GraphDecoder(torch.nn.Module):
+    def __init__(self, out_channels, hidden_channels=32, in_channels=16, layers=4, layer_type=GCNConv, edge_features_dim=1, batch_norm=False):
+        super(GraphDecoder, self).__init__()
+        self.edge_features_dim = edge_features_dim
+        self.convs = nn.ModuleList()
+        self.batch_norms = nn.ModuleList() if batch_norm else None
+        self.edge_decoder = InnerProductDecoder()
+        
+        # Create as many layers as the encoder, mirroring the structure
+        for i in range(layers - 1):
+            channels = in_channels if i == 0 else hidden_channels
+            self.convs.append(layer_type(channels, hidden_channels))
+            if batch_norm:
+                self.batch_norms.append(nn.BatchNorm1d(hidden_channels))
+        
+        # Last layer to reconstruct the original input feature dimensions
+        self.conv_out = layer_type(hidden_channels, out_channels)
+
+        # Linear layer to reconstruct edge features
+        self.edge_features_recon = nn.Linear(in_channels*2, edge_features_dim) # 1 because binary thing
+
+    def forward(self, *args,**kwargs):
+        return self.edge_decoder(*args,**kwargs) 
+
+    
+    def node_decoder(self, z, edge_index, edge_weight=None):
+        for i, layer in enumerate(self.convs):
+            z = layer(z, edge_index, edge_weight).relu()  # GCN
+            if self.batch_norms is not None:
+                z = self.batch_norms[i](z)  # Batch Norm
+        
+        return self.conv_out(z, edge_index)
+    
+    def edge_features_decoder(self,z,edge_index):
+        # Get the source and target node embeddings for each edge
+        row, col = edge_index
+        edge_features = torch.cat([z[row], z[col]], dim=1)
+        
+        # Reconstruct edge features
+        edge_features_recon = torch.sigmoid(self.edge_features_recon(edge_features)).squeeze()
+        return edge_features_recon
+
+
+
+
 class GraphVAE(VGAE):
-    def __init__(self, encoder: Module, decoder: Module, num_embeddings:int | dict, embedding_dim, embedding_method, scale_grad_by_freq):
+    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_dim, embedding_method, scale_grad_by_freq):
         """
         Initializes the GraphVAE model.
 
@@ -148,12 +221,8 @@ class GraphVAE(VGAE):
                     vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1))
                     embedded.append(vector)
 
-        # Stack to form a 3D vector, else concats to keep 2D shape
-        if "stack" in self.embedding_method and self.embedding_method["stack"] == True:
-            new_x = torch.stack(embedded, dim=1)
-        else:
-            new_x = torch.cat(embedded,dim=1) # if len(embedded) > 1 else embedded[0]
 
+        new_x = torch.cat(embedded,dim=1)
         return new_x
     
     def feature_scale(self, nums):
@@ -193,151 +262,60 @@ class GraphVAE(VGAE):
         x_recon = self.decoder.node_decoder(z, edge_index)
         x_recon = self.reverse_embedding(x_recon)
 
-        # ef_recon = None # TODO: decode the edge features
+        ef_recon = self.decoder.edge_features_decoder(z,edge_index)
 
-        return x_recon, e_recon
+        return x_recon, e_recon, ef_recon
     
-    def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, alpha = 1, beta = 0, gamma = 0):
+    def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, edge_weight = None, alpha = 1, beta = 0, gamma = 0):
         
         # Compute link loss
         adj_loss = self.recon_loss(z, pos_edge_index,neg_edge_index)
 
         # Node features loss
-        feature_loss = F.mse_loss(x, self.decoder.node_decoder(z, pos_edge_index))
+        decoded_x = self.decoder.node_decoder(z, pos_edge_index)
+        feature_loss = F.cross_entropy(decoded_x,x)
 
         # Edge features loss
-        # edge_feat_loss = 0 # TODO: compute edge feature loss if not None
+        ef_loss = 0
+        if edge_weight is not None:
+            decoded_ef = self.decoder.edge_features_decoder(z, pos_edge_index)
+            
+            if self.decoder.edge_features_dim == 1:
+                ef_loss = F.binary_cross_entropy_with_logits(decoded_ef,edge_weight.float())
+            else:
+                ef_loss = F.cross_entropy(decoded_ef,edge_weight.float())
 
-        return alpha * adj_loss + beta * feature_loss
-
-
-   
-
-class GraphEncoder(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels=32, out_channels=16, layers:int=4,layer_type=GCNConv):
-        super(GraphEncoder, self).__init__()
-        self.convs = nn.ModuleList()
-
-        # Create as many layers as wanted, minimum # is 2
-        for i in range(layers - 1):
-            channels = in_channels if i == 0 else hidden_channels
-            self.convs.append(layer_type(channels,hidden_channels))
-        
-        # Last 2 layers in parallel
-        self.conv_mu = layer_type(hidden_channels, out_channels)
-        self.conv_logstd = layer_type(hidden_channels,out_channels)
-
-    def forward(self, x, edge_index):
-        for conv in self.convs:
-            x = conv(x, edge_index).relu()
-        
-        mu = self.conv_mu(x, edge_index)
-        logstd = self.conv_logstd(x, edge_index)
-
-        return mu, logstd
-    
-class GraphDecoder(torch.nn.Module):
-    def __init__(self, out_channels, hidden_channels=32, in_channels=16, layers=4, layer_type=GCNConv):
-        super(GraphDecoder, self).__init__()
-        self.convs = nn.ModuleList()
-        self.edge_decoder = InnerProductDecoder()
-        
-        # Create as many layers as the encoder, mirroring the structure
-        for i in range(layers - 1):
-            channels = in_channels if i == 0 else hidden_channels
-            self.convs.append(layer_type(channels, hidden_channels))
-        
-        # Last layer to reconstruct the original input feature dimensions
-        self.conv_out = layer_type(hidden_channels, out_channels)
+        return alpha * adj_loss + beta * feature_loss + gamma * ef_loss
 
 
-    def forward(self, *args,**kwargs):
-        return self.edge_decoder(*args,**kwargs) 
+    def calculate_accuracy(self, z, x, pos_edge_index, edge_weight=None):
 
-    
-    def node_decoder(self, z, edge_index):
-        for conv in self.convs:
-            z = conv(z, edge_index).relu()
-        
-        return self.conv_out(z, edge_index)
+        # Edge index accuracy
+        e_recon = self.decoder(z, pos_edge_index,True)
+        e_recon = (e_recon > 0.5).float()
+        correct_e = (e_recon == 1).sum().item()
+        edge_accuracy = correct_e / pos_edge_index.size(1)
 
-    # def forward(self, z, edge_index, sigmoid:bool = True): # *args,**kwargs
-    #     for conv in self.convs:
-    #         z = conv(z, edge_index).relu()
-        
-    #     x_recon = self.conv_out(z, edge_index)
-    #     e_recon = self.edge_decoder(z,edge_index,sigmoid)
-    #     return x_recon, e_recon
-        
-    
-# class Encoder(torch.nn.Module):
-#     def __init__(self, in_channels, hidden_channels=32, out_channels=16, layers=4,embedding_dim=192,vocab_size=3000,scale_grad_by_freq=False,layer_type=GCNConv, variational=False,batch_norm=False):
-#         super(Encoder, self).__init__()
-#         self.layers = layers
-#         self.embedding_dim = embedding_dim
-#         self.input_features = in_channels + embedding_dim - 1
-#         self.embedding = nn.Embedding(vocab_size,embedding_dim,scale_grad_by_freq=scale_grad_by_freq,padding_idx=0)
-#         self.variational = variational
-#         # self.batch_norm = batch_norm
+        # Node features accuracy
+        decoded_x = self.decoder.node_decoder(z, pos_edge_index)
+        _, predicted_nodes = torch.max(decoded_x, dim=1)
+        _, true_nodes = torch.max(x,dim=1)
 
-#         # Setup list of Layers
-#         self.convs = nn.ModuleList()
+        correct_nodes = (predicted_nodes == true_nodes).sum().item()
+        node_accuracy = correct_nodes / true_nodes.size(0)
 
-#         # Create as many layers as wanted, minimum # is 2
-#         for i in range(layers - 1):
-#             # if first layer, set channels as the number of input features, else put to hidden_channels
-#             channels = self.input_features if i == 0 else hidden_channels
-#             self.convs.append(layer_type(channels,hidden_channels))
-#             # if self.batch_norm and i < layers - 2:  # Add BN after each but the last layer
-#             #     self.convs.append(nn.BatchNorm1d(hidden_channels))
-        
-#         # Last 2 layers in parallel
-#         self.conv_mu = layer_type(hidden_channels, out_channels)
-#         self.conv_logstd = layer_type(hidden_channels,out_channels)
+        # Edge features accuracy
+        edge_features_accuracy = None
+        if edge_weight is not None:
+            decoded_ef = self.decoder.edge_features_decoder(z, pos_edge_index)
+            if self.decoder.edge_features_dim == 1:
+                predicted_edges = (torch.sigmoid(decoded_ef) > 0.5).float()
+                correct_edges = (predicted_edges == edge_weight).sum().item()
+                edge_features_accuracy = correct_edges / edge_weight.size(0)
+            else:
+                _, predicted_edges = torch.max(decoded_ef, dim=1)
+                correct_edges = (predicted_edges == edge_weight).sum().item()
+                edge_features_accuracy = correct_edges / edge_weight.size(0)
 
+        return node_accuracy, edge_accuracy, edge_features_accuracy
 
-
-#     def forward(self, x, edge_index):
-#         # x, edge_index = batch.x, batch.edge_index
-
-#         indices = x[:,-1]
-#         one_hot = x[:,:-1]
-#         embedded = self.embedding(indices)
-#         new_x = torch.cat((one_hot,embedded),dim=1)
-
-#         for conv in self.convs:
-#             new_x = conv(new_x, edge_index).relu()
-        
-#         mu = self.conv_mu(new_x, edge_index)
-#         logstd = self.conv_logstd(new_x, edge_index)
-
-    
-#         if self.variational:
-#             return mu, logstd
-#         else:
-#             return mu
-        
-    # def find_nearest_embeddings(self, embedded_vectors):
-    #     embedding_matrix = self.embedding.weight.data  # [vocab_size, embedding_dim]
-    #     embedded_vectors = embedded_vectors.cpu()  # [num_nodes, embedding_dim]
-    #     cosine_sim = F.cosine_similarity(embedded_vectors.unsqueeze(1), embedding_matrix.unsqueeze(0), dim=2)
-    #     indices = cosine_sim.argmax(dim=1)
-    #     return indices
-
-
-# class Decoder(torch.nn.Module):
-#     def __init__(self, ):
-#         super(Decoder, self).__init__()
-#         # self.embedding_weight = embedding_weight
-
-#     def decode_edges(self, z):
-#         return torch.sigmoid(torch.matmul(z, z.t()))  # Inner product for edge reconstruction
-
-#     def decode_node_features(self, z):
-#         cosine_sim = F.cosine_similarity(z.unsqueeze(1), self.embedding_weight.unsqueeze(0), dim=2)
-#         decoded_indices = cosine_sim.argmax(dim=1)
-#         return decoded_indices
-
-#     def reconstruct_node_features(self, one_hot, decoded_indices):
-#         combined_features = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1)
-#         return combined_features

@@ -194,7 +194,7 @@ class GraphDataset(InMemoryDataset):
         # Create pytorch geometric graph
         py_g = Data(
             x=torch.tensor(x,dtype=torch.long),
-            edge_index=edge_index,
+            edge_index= edge_index,
             edge_attr= edge_features,
             tag_index = torch.tensor(tags,dtype=torch.long),
             pos=torch.tensor(positions,dtype=torch.long),
