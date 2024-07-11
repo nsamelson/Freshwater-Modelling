@@ -29,6 +29,7 @@ METHODS = {
     "embed": ["tag","concat","combined","mi","mo","mtext","mn"],
     "linear":["mn"],
     "scale": ["log"],
+    "loss":["cross_entropy","mse","cosine"]
 }
 
 
@@ -61,12 +62,12 @@ class GraphEncoder(torch.nn.Module):
         return mu, logstd
     
 class GraphDecoder(torch.nn.Module):
-    def __init__(self, out_channels, hidden_channels=32, in_channels=16, layers=4, layer_type=GCNConv, edge_features_dim=1, batch_norm=False):
+    def __init__(self, out_channels, hidden_channels=32, in_channels=16, layers=4, layer_type=GCNConv, edge_dim=1, batch_norm=False):
         super(GraphDecoder, self).__init__()
-        self.edge_features_dim = edge_features_dim
+        self.edge_dim = edge_dim
         self.convs = nn.ModuleList()
         self.batch_norms = nn.ModuleList() if batch_norm else None
-        self.edge_decoder = InnerProductDecoder()
+        self.adjency_decoder = InnerProductDecoder()
         
         # Create as many layers as the encoder, mirroring the structure
         for i in range(layers - 1):
@@ -79,10 +80,10 @@ class GraphDecoder(torch.nn.Module):
         self.conv_out = layer_type(hidden_channels, out_channels)
 
         # Linear layer to reconstruct edge features
-        self.edge_features_recon = nn.Linear(in_channels*2, edge_features_dim) # 1 because binary thing
+        self.edge_recon = nn.Linear(in_channels*2, edge_dim) # 1 because binary thing
 
     def forward(self, *args,**kwargs):
-        return self.edge_decoder(*args,**kwargs) 
+        return self.adjency_decoder(*args,**kwargs) 
 
     
     def node_decoder(self, z, edge_index, edge_weight=None):
@@ -93,14 +94,18 @@ class GraphDecoder(torch.nn.Module):
         
         return self.conv_out(z, edge_index)
     
-    def edge_features_decoder(self,z,edge_index):
+    def edge_decoder(self, z, edge_index):
         # Get the source and target node embeddings for each edge
         row, col = edge_index
         edge_features = torch.cat([z[row], z[col]], dim=1)
         
         # Reconstruct edge features
-        edge_features_recon = torch.sigmoid(self.edge_features_recon(edge_features)).squeeze()
-        return edge_features_recon
+        edge_recon = self.edge_recon(edge_features)
+
+        if self.edge_dim == 1:
+            return torch.sigmoid(edge_recon).squeeze()
+        else: 
+            return torch.softmax(edge_recon, dim=1)
 
 
 
@@ -272,7 +277,7 @@ class GraphVAE(VGAE):
         x_recon = self.decoder.node_decoder(z, edge_index)
         x_recon = self.reverse_embedding(x_recon)
 
-        ef_recon = self.decoder.edge_features_decoder(z,edge_index)
+        ef_recon = self.decoder.edge_decoder(z,edge_index)
 
         return x_recon, e_recon, ef_recon
     
@@ -298,9 +303,9 @@ class GraphVAE(VGAE):
         # Edge features loss
         ef_loss = 0
         if edge_weight is not None:
-            decoded_ef = self.decoder.edge_features_decoder(z, pos_edge_index)
+            decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
             
-            if self.decoder.edge_features_dim == 1:
+            if self.decoder.edge_dim == 1:
                 ef_loss = F.binary_cross_entropy_with_logits(decoded_ef,edge_weight.float())
             else:
                 ef_loss = F.cross_entropy(decoded_ef,edge_weight.float())
@@ -335,8 +340,8 @@ class GraphVAE(VGAE):
         # Edge features accuracy
         edge_features_accuracy = None
         if edge_weight is not None:
-            decoded_ef = self.decoder.edge_features_decoder(z, pos_edge_index)
-            if self.decoder.edge_features_dim == 1:
+            decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
+            if self.decoder.edge_dim == 1:
                 predicted_edges = (torch.sigmoid(decoded_ef) > 0.5).float()
                 correct_edges = (predicted_edges == edge_weight).sum().item()
                 edge_features_accuracy = correct_edges / edge_weight.size(0)
