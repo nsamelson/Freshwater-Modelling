@@ -3,6 +3,8 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv,GraphConv, InnerProductDecoder, BatchNorm, VGAE, MessagePassing
+from torch_geometric.utils import negative_sampling
+
 from torch_geometric.utils import from_networkx
 from torch_geometric.data import DataLoader, Data
 # from torch.nn import BatchNorm1d
@@ -126,6 +128,7 @@ class GraphVAE(VGAE):
         self.embedding_dim = embedding_dim
         self.scale_grad = scale_grad_by_freq
         self.unknown_id = 1
+        # self.device = device
 
         # if embedding_method not in EMBEDDINGS:
         #     raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS}, but got {embedding_method}")
@@ -150,7 +153,7 @@ class GraphVAE(VGAE):
                     else:
                         input_dims = self.embedding_dim
 
-                    self.embeddings[vocab] = nn.Embedding(input_dims, input_dims)
+                    self.embeddings[vocab] = nn.Embedding(input_dims, input_dims) #, device=self.device)
                     self.embeddings[vocab].weight.data = torch.eye(input_dims)
 
             if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
@@ -163,11 +166,11 @@ class GraphVAE(VGAE):
                         input_dims = self.num_embeddings[vocab]
                     else:
                         raise ValueError(f"Invalid vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
-                    self.embeddings[vocab] = nn.Embedding(input_dims, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0)
+                    self.embeddings[vocab] = nn.Embedding(input_dims, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0) #, device=self.device)
 
             if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
                 for vocab in self.embedding_method["linear"]:
-                    self.embeddings[vocab] = nn.Linear(1,self.embedding_dim)
+                    self.embeddings[vocab] = nn.Linear(1,self.embedding_dim) #, device=self.device)
 
 
 
@@ -186,13 +189,17 @@ class GraphVAE(VGAE):
             Tensor: The embedded and concatenated feature vector.
         """
         embedded = []
-
+        device = x.device
+        # Ensure all embeddings are moved to the correct device
+        for key in self.embeddings:
+            self.embeddings[key] = self.embeddings[key].to(device)
+            
         if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
             for vocab in self.embedding_method["onehot"]:
                 if vocab == "tag":
                     embedded.append(self.embeddings["tag"](tag_index))
                 elif vocab == "concat":
-                    x = torch.where(x >= self.embedding_dim, torch.tensor(self.unknown_id, device=x.device), x)
+                    x = torch.where(x >= self.embedding_dim, torch.tensor(self.unknown_id, device=device), x)
                     embedded.append(self.embeddings["concat"](x))
                 elif vocab == "pos":
                     embedded.append(self.embeddings["pos"](pos))
@@ -207,7 +214,7 @@ class GraphVAE(VGAE):
                     embedded.append(self.embeddings[vocab](x))
                 elif vocab in ["mi","mn","mtext","mo"]:
                     mask = (tag_index == MATHML_TAGS.index(vocab))
-                    vector = torch.zeros(x.size(0),self.embedding_dim, dtype=torch.float32, device=x.device) #.unsqueeze(1).repeat(1, self.embedding_dim)
+                    vector = torch.zeros(x.size(0),self.embedding_dim, dtype=torch.float32, device=device) #.unsqueeze(1).repeat(1, self.embedding_dim)
                     vector[mask] = self.embeddings[vocab](x[mask])
                     embedded.append(vector)
                 else:
@@ -217,12 +224,12 @@ class GraphVAE(VGAE):
                 for vocab in self.embedding_method["linear"]:
                     mask = (nums != -1)
                     nums[mask] = self.feature_scale(nums[mask])
-                    vector = torch.zeros(x.size(0), self.embedding_dim, dtype=torch.float32, device=x.device)
+                    vector = torch.zeros(x.size(0), self.embedding_dim, dtype=torch.float32, device=device)
                     vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1))
                     embedded.append(vector)
 
 
-        new_x = torch.cat(embedded,dim=1)
+        new_x = torch.cat(embedded,dim=1) #.to(device)
         return new_x
     
     def feature_scale(self, nums):
@@ -238,20 +245,23 @@ class GraphVAE(VGAE):
         """
         Reverses the embedding process to find the index
         """
-        embedded_part = x_recon[:, -self.embedding.embedding_dim:]
-        one_hot = x_recon[:, :-self.embedding.embedding_dim]
+        # embedded_part = x_recon[:, -self.embedding.embedding_dim:]
+        # one_hot = x_recon[:, :-self.embedding.embedding_dim]
 
-        # Binary output to get the one-hot back
-        # one_hot = (torch.sigmoid(one_hot) > 0.5).float()
-        one_hot = (one_hot == one_hot.max(dim=-1, keepdim=True)[0]).float()
-        # one_hot = torch.zeros(one_hot.shape)
+        # # Binary output to get the one-hot back
+        # # one_hot = (torch.sigmoid(one_hot) > 0.5).float()
+        # one_hot = (one_hot == one_hot.max(dim=-1, keepdim=True)[0]).float()
+        # # one_hot = torch.zeros(one_hot.shape)
 
-        # Find the index back
-        cosine_sim = F.cosine_similarity(embedded_part.unsqueeze(1), self.embedding.weight.unsqueeze(0), dim=2)
-        decoded_indices = cosine_sim.argmax(dim=1)
+        # # Find the index back
+        # cosine_sim = F.cosine_similarity(embedded_part.unsqueeze(1), self.embedding.weight.unsqueeze(0), dim=2)
+        # decoded_indices = cosine_sim.argmax(dim=1)
 
-        # Combine the one-hot with the index
-        x_combined = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1).long()
+        # # Combine the one-hot with the index
+        # x_combined = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1).long()
+
+
+        x_combined = torch.argmax(x_recon,dim=-1)
         
         return x_combined
     
@@ -272,8 +282,18 @@ class GraphVAE(VGAE):
         adj_loss = self.recon_loss(z, pos_edge_index,neg_edge_index)
 
         # Node features loss
-        decoded_x = self.decoder.node_decoder(z, pos_edge_index)
-        feature_loss = F.cross_entropy(decoded_x,x)
+        x_recon = self.decoder.node_decoder(z, pos_edge_index)
+
+        # If it's onehot
+        feature_loss = F.cross_entropy(x_recon,x)
+
+        # if it's embedded option 1
+        # feature_loss = F.mse_loss(x_recon,x)
+
+        # if it's embedded option 2
+        # similarity = F.cosine_similarity(x_recon,x, dim=1)
+        # target = torch.ones_like(similarity)
+        # feature_loss = F.cosine_embedding_loss(x_recon, x, target, margin=0.0)
 
         # Edge features loss
         ef_loss = 0
@@ -288,21 +308,29 @@ class GraphVAE(VGAE):
         return alpha * adj_loss + beta * feature_loss + gamma * ef_loss
 
 
-    def calculate_accuracy(self, z, x, pos_edge_index, edge_weight=None):
+    def calculate_accuracy(self, z, x, pos_edge_index, neg_edge_index, indices, edge_weight=None,):
 
         # Edge index accuracy
-        e_recon = self.decoder(z, pos_edge_index,True)
-        e_recon = (e_recon > 0.5).float()
-        correct_e = (e_recon == 1).sum().item()
-        edge_accuracy = correct_e / pos_edge_index.size(1)
+        if neg_edge_index is None:
+            neg_edge_index = negative_sampling(pos_edge_index, z.size(0))
+
+        pos_pred = self.decoder(z, pos_edge_index, sigmoid=True)
+        neg_pred = self.decoder(z, neg_edge_index, sigmoid=True)
+        pos_pred_binary = (pos_pred > 0.5).float()
+        neg_pred_binary = (neg_pred <= 0.5).float()
+
+        true_positives = pos_pred_binary.sum().item()
+        true_negatives = neg_pred_binary.sum().item()
+        total_edges = pos_edge_index.size(1) + neg_edge_index.size(1)
+        edge_accuracy = (true_positives + true_negatives) / total_edges
 
         # Node features accuracy
-        decoded_x = self.decoder.node_decoder(z, pos_edge_index)
-        _, predicted_nodes = torch.max(decoded_x, dim=1)
-        _, true_nodes = torch.max(x,dim=1)
+        x_recon = self.decoder.node_decoder(z, pos_edge_index)
 
-        correct_nodes = (predicted_nodes == true_nodes).sum().item()
-        node_accuracy = correct_nodes / true_nodes.size(0)
+        similarity = torch.matmul(x_recon, x.T)
+        recon_indices = similarity.argmax(dim=1)
+        node_accuracy = (recon_indices == indices).float().mean()
+
 
         # Edge features accuracy
         edge_features_accuracy = None

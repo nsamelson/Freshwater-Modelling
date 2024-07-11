@@ -68,8 +68,8 @@ if __name__=="__main__":
 
         embedding_dim = 256
         method = {
-            "onehot": ["concat"],
-            "embed": [], # "mi","mo","mtext","mn"
+            "onehot": [],
+            "embed": ["concat"], # "mi","mo","mtext","mn"
             "linear": [],
             "scale": "log"
         }
@@ -94,19 +94,26 @@ if __name__=="__main__":
         loss = loss + (1 / graph.num_nodes) * model.kl_loss()
         print(loss)
 
-        print(model.calculate_accuracy(z,x,graph.edge_index,graph.edge_attr))
+        accuracy = model.calculate_accuracy(z,x,graph.edge_index,None, graph.tag_index, graph.edge_attr,)
+        print(accuracy)
 
-        # print(x, x.shape)
-        # print(x[9])
-        # print(x[17])
-
-        # print(x[-1])
-        # a = (x == 1).nonzero(as_tuple=False)
-        # print(a, a.shape)
 
 
     if args.train:
-        train.main(model_name)
+        if debug:
+            config = {
+                "model_name": model_name,
+                "num_epochs": 20,
+                "latex_set":"OleehyO",
+                "vocab_type":"concat",
+                "embedding_dim":256,
+                "method":{
+                    "onehot": ["concat"],
+                }
+            }
+            train.train_model(config)
+        else:
+            train.main(model_name)
     
     if args.search:
         search.main()
