@@ -29,12 +29,14 @@ import torch_geometric.transforms as T
 from tqdm import tqdm
 from models.train import validate
 # from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
+from preprocessing.MathmlDataset import MathmlDataset
 from preprocessing.GraphDataset import GraphDataset
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 import random
 
 from config import MATHML_TAGS
 
+from preprocessing.VocabBuilder import VocabBuilder
 from utils.plot import plot_loss_graph, plot_training_graphs
 from utils.save import json_dump
 import pandas as pd
@@ -42,7 +44,7 @@ import tempfile
 
 # os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
-def main(model_name="GraphVAE_1"):
+def main(model_name="default"):
     dir_path = os.path.join("trained_models",model_name)
     params_path = os.path.join(dir_path,"params.json")
     model_path = os.path.join(dir_path,"checkpoint.pt")
@@ -69,27 +71,41 @@ def test_model(config:dict, model_path:str):
     print('CUDA availability:', device)
 
     # load and setup dataset
-    root_dir = "/data/nsam947/Freshwater-Modelling/dataset/"
-    dataset = GraphDataset(root=root_dir, equations_file='cleaned_formulas_katex.xml',force_reload=False)  
+    # root_dir = "/data/nsam947/Freshwater-Modelling/dataset/"
+    # dataset = GraphDataset(root=root_dir, equations_file='cleaned_formulas_katex.xml',force_reload=False)  
 
-    data_size = len(dataset)
-    test_data = dataset[int(data_size * 0.9):]
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=8)
+    # data_size = len(dataset)
+    # test_data = dataset[int(data_size * 0.9):]
+    # test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=8)
 
     # Get channels for layers
     embedding_dim = config.get("embedding_dims",200)
-    in_channels = dataset.num_features + embedding_dim - 1
+    # in_channels = dataset.num_features + embedding_dim - 1
     hidden_channels=config.get("hidden_channels",32)
     out_channels= config.get("out_channels",16)
     layers = config.get("num_layers",4)
-    sclae_grad_by_freq = config.get("scale_grad_by_freq",True)
+    scale_grad_by_freq = config.get("scale_grad_by_freq",True)
     layer_type=config.get("layer_type",GCNConv)
     layer_type = load_class_from_string(pyg_nn,layer_type)
+    latex_set = config.get("latex_set","OleehyO")
+    vocab_type = config.get("vocab_type","concat")
+    method = config.get("method",{"onehot":["concat"]})
+    xml_name = "default"
+    debug = False
+    force_reload = False
+
+    # load and setup dataset
+    mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=False)
+    vocab = VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload, reload_xml_elements=False)
+    dataset = GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug)
+
+    train, val, test = dataset.split(shuffle=False)
+    test_loader = DataLoader(test, batch_size=256, shuffle=False, num_workers=8)
 
     # load model
-    encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, sclae_grad_by_freq)
+    encoder = GraphEncoder(embedding_dim,hidden_channels,out_channels,layers,layer_type)
+    decoder = GraphDecoder(embedding_dim,hidden_channels,out_channels,layers,layer_type)
+    model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,scale_grad_by_freq)
 
     # decoder = Decoder(encoder.embedding.weight.data)
 
@@ -99,6 +115,10 @@ def test_model(config:dict, model_path:str):
     model.load_state_dict(model_state_data["model_state"])
     model.to(device)
 
+
+    node_acc, edge_acc = reconstruct_graph(model,test_loader,device)
+    print("Node accuracy: ", node_acc)
+    print("Edge accuracy: ", edge_acc)
 
     # Evaluate on the test set
     # avg_val_loss, avg_auc, avg_ap = validate(
@@ -117,19 +137,19 @@ def test_model(config:dict, model_path:str):
 
     # Visualise things
     # visualise_bottleneck(model,test_data, device)
-    new_nodes, edges, old_nodes = reconstruct_graph(model,test_loader,device, in_channels)
-    new_graph = build_recon_graph(new_nodes, edges)
-    old_graph = build_recon_graph(old_nodes,edges)
+    # new_nodes, edges, old_nodes = reconstruct_graph(model,test_loader,device)
+    # new_graph = build_recon_graph(new_nodes, edges, vocab)
+    # old_graph = build_recon_graph(old_nodes, edges, vocab)
 
-    # original equation
-    xml_root = graph_to_xml(old_graph)
-    tree = ET.ElementTree(xml_root)
-    tree.write("out/encoded_equation.xml", encoding="utf-8", xml_declaration=True)
+    # # original equation
+    # xml_root = graph_to_xml(old_graph)
+    # tree = ET.ElementTree(xml_root)
+    # tree.write("out/encoded_equation.xml", encoding="utf-8", xml_declaration=True)
 
-    # decoded equation
-    xml_root = graph_to_xml(new_graph)
-    tree = ET.ElementTree(xml_root)
-    tree.write("out/decoded_equation.xml", encoding="utf-8", xml_declaration=True)
+    # # decoded equation
+    # xml_root = graph_to_xml(new_graph)
+    # tree = ET.ElementTree(xml_root)
+    # tree.write("out/decoded_equation.xml", encoding="utf-8", xml_declaration=True)
 
 def generate_all_possible_edges(num_nodes):
     """Generate all possible edges for a graph with num_nodes nodes."""
@@ -179,26 +199,34 @@ def graph_to_xml(G):
 
 
 
-def build_recon_graph(nodes, edges):
+def build_recon_graph(nodes, edges, vocab):
     new_graph = nx.Graph()
 
     # Get vocab
-    vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling","out/vocab_texts_katex.json")
-    with open(vocab_path,"r") as f:
-        vocab = json.load(f)
+    # vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling","out/vocab_texts_katex.json")
+    # with open(vocab_path,"r") as f:
+    #     vocab = json.load(f)
 
-    vocab_texts = list(vocab.keys())
+    vocab_texts = list(vocab.vocab_table.keys())
     
     # Add nodes with features
     for i, features in enumerate(nodes):
-        one_hot = features[:-1]
-        mathml_index = np.flatnonzero(one_hot)[0]
-        tag = MATHML_TAGS[mathml_index]
+        tag_text = vocab_texts[features]
 
-        text = ""
-        if tag in ["mi","mo","mtext","mn"]:
-            vocab_index = features[-1]
-            text = vocab_texts[vocab_index]
+        tag, text = "", ""
+        if "_" in tag_text:
+            tag, text = tag_text.split("_")
+        else:
+            tag = tag_text
+
+        # one_hot = features[:-1]
+        # mathml_index = np.flatnonzero(one_hot)[0]
+        # tag = MATHML_TAGS[mathml_index]
+
+        # text = ""
+        # if tag in ["mi","mo","mtext","mn"]:
+        #     vocab_index = features[-1]
+        #     text = vocab_texts[vocab_index]
         
 
         new_graph.add_node(i, tag=tag, text=text)
@@ -209,44 +237,56 @@ def build_recon_graph(nodes, edges):
 
     return new_graph
 
-def reconstruct_graph(model:GraphVAE, test_loader, device, in_channels):
+def reconstruct_graph(model:GraphVAE, test_loader, device):
     model.eval()
 
     equation_index = 420
+    tot_node_accuracy = 0
+    tot_edge_accuracy = 0
+
     with torch.no_grad():
         for i,batch in enumerate(test_loader):
-            if i == equation_index:                
-                graph = batch.to(device)
-                edge_index = graph.edge_index
+            # if i == equation_index:                
+            batch = batch.to(device)
+            edge_index = batch.edge_index.to(device)
 
-                # Encodeing part
-                x = model.embed_x(graph.x)
-                z = model.encode(x,edge_index)
+            # Encodeing part
+            x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)         
+            z = model.encode(x, batch.edge_index, batch.edge_attr)
 
-                # Decoding part
-                # edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
-                x_recon, e_recon = model.decode_all(z,edge_index,sigmoid=True)
+            accuracy = model.calculate_accuracy(z,x,batch.edge_index,batch.edge_attr)
 
-                # print("Input graph nodes: ",graph.x, graph.x.shape)
-                # print("Input graph edges: ",edge_index, edge_index.shape)
-                # print("Latent space ",z, z.shape)
-                # print("Output graph nodes: ",x_recon, x_recon.shape)
-                # print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
+            tot_node_accuracy += accuracy[0]
+            tot_edge_accuracy += accuracy[1]
+                # print("accuracy: ", accuracy)
+
+                # # Decoding part
+                # # edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
+                # x_recon, e_recon, ef_recon = model.decode_all(z,edge_index,sigmoid=True)
+
+                # # print("Input graph nodes: ",graph.x, graph.x.shape)
+                # # print("Input graph edges: ",edge_index, edge_index.shape)
+                # # print("Latent space ",z, z.shape)
+                # # print("Output graph nodes: ",x_recon, x_recon.shape)
+                # # print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
 
 
-                x_recon = x_recon.cpu().numpy()
-                e_recon = e_recon.cpu().numpy()
+                # x_recon = x_recon.cpu().numpy()
+                # e_recon = e_recon.cpu().numpy()
                 
 
-                filtered_edge_index = edge_index[:, e_recon == 1]
+                # filtered_edge_index = edge_index[:, e_recon == 1]
 
-                edge_tuples = [(int(filtered_edge_index[0, i]), int(filtered_edge_index[1, i])) for i in range(filtered_edge_index.shape[1])]
+                # edge_tuples = [(int(filtered_edge_index[0, i]), int(filtered_edge_index[1, i])) for i in range(filtered_edge_index.shape[1])]
 
 
 
-                return x_recon, edge_tuples, graph.x.cpu().numpy()   
+                # return x_recon, edge_tuples, batch.x.cpu().numpy()   
 
-            
+        node_accuracy = tot_node_accuracy / len(test_loader)
+        edge_accuracy = tot_edge_accuracy / len(test_loader)
+
+        return node_accuracy, edge_accuracy
 
             # print("New py_graph: ", new_pyg)
             # print("New graph: ", new_graph)
