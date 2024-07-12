@@ -111,7 +111,7 @@ class GraphDecoder(torch.nn.Module):
 
 
 class GraphVAE(VGAE):
-    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_dim, embedding_method, scale_grad_by_freq):
+    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_dim, embedding_method:dict, scale_grad_by_freq):
         """
         Initializes the GraphVAE model.
 
@@ -150,19 +150,13 @@ class GraphVAE(VGAE):
             self.embeddings = {}
 
             if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
-                for vocab in self.embedding_method["onehot"]:
-                    if vocab == "tag":
-                        input_dims = len(MATHML_TAGS)
-                    elif vocab == "pos":
-                        input_dims = 256
-                    else:
-                        input_dims = self.embedding_dim
+                for vocab, embed_dim in self.embedding_method["onehot"].items():
 
-                    self.embeddings[vocab] = nn.Embedding(input_dims, input_dims) #, device=self.device)
-                    self.embeddings[vocab].weight.data = torch.eye(input_dims)
+                    self.embeddings[vocab] = nn.Embedding(embed_dim, embed_dim) 
+                    self.embeddings[vocab].weight.data = torch.eye(embed_dim)
 
             if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
-                for vocab in self.embedding_method["embed"]:
+                for vocab, embed_dim in self.embedding_method["embed"].items():
                     if vocab == "tag":
                         input_dims = len(MATHML_TAGS) 
                     elif vocab in ["concat","combined"]:
@@ -171,11 +165,11 @@ class GraphVAE(VGAE):
                         input_dims = self.num_embeddings[vocab]
                     else:
                         raise ValueError(f"Invalid vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
-                    self.embeddings[vocab] = nn.Embedding(input_dims, self.embedding_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0) #, device=self.device)
+                    self.embeddings[vocab] = nn.Embedding(input_dims, embed_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0) 
 
             if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
-                for vocab in self.embedding_method["linear"]:
-                    self.embeddings[vocab] = nn.Linear(1,self.embedding_dim) #, device=self.device)
+                for vocab, embed_dim in self.embedding_method["linear"].items():
+                    self.embeddings[vocab] = nn.Linear(1,embed_dim)
 
 
 
@@ -200,41 +194,42 @@ class GraphVAE(VGAE):
             self.embeddings[key] = self.embeddings[key].to(device)
             
         if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
-            for vocab in self.embedding_method["onehot"]:
+            for vocab, embed_dim in self.embedding_method["onehot"].items():
                 if vocab == "tag":
                     embedded.append(self.embeddings["tag"](tag_index))
                 elif vocab == "concat":
-                    x = torch.where(x >= self.embedding_dim, torch.tensor(self.unknown_id, device=device), x)
                     embedded.append(self.embeddings["concat"](x))
+                    # limit x to avoid any overflow
+                    x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
                 elif vocab == "pos":
                     embedded.append(self.embeddings["pos"](pos))
                 else:
                     raise ValueError(f"Invalid one-hot vocab selected. Expected one of {METHODS['onehot']}, but got {vocab}")
 
         if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
-            for vocab in self.embedding_method["embed"]:
+            for vocab, embed_dim in self.embedding_method["embed"].items():
                 if vocab == "tag":
                     embedded.append(self.embeddings["tag"](tag_index))
                 elif vocab in ["concat","combined"]:
                     embedded.append(self.embeddings[vocab](x))
                 elif vocab in ["mi","mn","mtext","mo"]:
                     mask = (tag_index == MATHML_TAGS.index(vocab))
-                    vector = torch.zeros(x.size(0),self.embedding_dim, dtype=torch.float32, device=device) #.unsqueeze(1).repeat(1, self.embedding_dim)
+                    vector = torch.zeros(x.size(0),embed_dim, dtype=torch.float32, device=device) #.unsqueeze(1).repeat(1, self.embedding_dim)
                     vector[mask] = self.embeddings[vocab](x[mask])
                     embedded.append(vector)
                 else:
                     raise ValueError(f"Invalid embed vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
 
         if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
-                for vocab in self.embedding_method["linear"]:
+                for vocab, embed_dim in self.embedding_method["linear"].items():
                     mask = (nums != -1)
                     nums[mask] = self.feature_scale(nums[mask])
-                    vector = torch.zeros(x.size(0), self.embedding_dim, dtype=torch.float32, device=device)
-                    vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1))
+                    vector = torch.zeros(x.size(0), embed_dim, dtype=torch.float32, device=device)
+                    vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1)) # 
                     embedded.append(vector)
 
 
-        new_x = torch.cat(embedded,dim=1) #.to(device)
+        new_x = torch.cat(embedded,dim=1)
         return new_x
     
     def feature_scale(self, nums):
@@ -245,37 +240,87 @@ class GraphVAE(VGAE):
                 return torch.log10(torch.clamp(nums, min=1e-6) + 1e-7)
         else:
             raise ValueError(f"Invalid feature scaling. Expected one of {METHODS['scale']}, but got {scaling}")
-    
-    def reverse_embedding(self, x_recon):
+        
+    def reverse_feature_scale(self, nums):
+        scaling = self.embedding_method["scale"]
+        if scaling in METHODS["scale"]:
+            if scaling == "log":
+                return torch.clamp((10 ** nums) - 1e-7, min=1e-6)
+        else:
+            raise ValueError(f"Invalid feature scaling. Expected one of {METHODS['scale']}, but got {scaling}")
+        
+
+    def reverse_embed_x(self, x_recon):
         """
         Reverses the embedding process to find the index
         """
-        # embedded_part = x_recon[:, -self.embedding.embedding_dim:]
-        # one_hot = x_recon[:, :-self.embedding.embedding_dim]
+        print("X SHAPE:",  torch.zeros(x_recon.size(0), dtype=torch.long).shape)
+        data = {
+            "x": torch.zeros(x_recon.size(0), dtype=torch.long),
+            "pos": None,
+            "nums": torch.zeros(x_recon.size(0), dtype=torch.float32),
+            "tag": None
+        }
+        vector_index = 0
 
-        # # Binary output to get the one-hot back
-        # # one_hot = (torch.sigmoid(one_hot) > 0.5).float()
-        # one_hot = (one_hot == one_hot.max(dim=-1, keepdim=True)[0]).float()
-        # # one_hot = torch.zeros(one_hot.shape)
+        if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
+            for vocab, embed_dim in self.embedding_method["onehot"].items():
+                x_onehot = x_recon[vector_index: vector_index + embed_dim]
+                index = torch.argmax(x_onehot)
+                if vocab == "tag":
+                    data["tag"] = index
+                elif vocab == "concat":
+                    data["x"] = index
+                elif vocab == "pos":
+                    data["pos"] = index
+                
+                # update index position in the vector
+                vector_index += embed_dim
 
-        # # Find the index back
-        # cosine_sim = F.cosine_similarity(embedded_part.unsqueeze(1), self.embedding.weight.unsqueeze(0), dim=2)
-        # decoded_indices = cosine_sim.argmax(dim=1)
+        if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
+            for vocab, embed_dim in self.embedding_method["embed"].items():
+                x_embed = x_recon[:,vector_index: vector_index + embed_dim]
 
-        # # Combine the one-hot with the index
-        # x_combined = torch.cat((one_hot, decoded_indices.unsqueeze(1).float()), dim=1).long()
+                similarity = F.cosine_similarity(x_embed.unsqueeze(1),self.embeddings[vocab].weight.unsqueeze(0), dim=2)
+                index = similarity.argmax(dim=1)
 
+                if vocab == "tag":
+                    data["tag"] = index
+                elif vocab in ["concat","combined"]:
+                    data["x"] = index
+                elif vocab in ["mi","mn","mtext","mo"]:
+                    # create a mask to apply the found index only on the data 
+                    # for which the tag is equal to the vocab
+                    mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
+                    data["x"][mask] = index[mask]
 
-        x_combined = torch.argmax(x_recon,dim=-1)
-        
-        return x_combined
+                vector_index += embed_dim
+
+        if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
+            for vocab, embed_dim in self.embedding_method["linear"].items():
+                x_embed = x_recon[:,vector_index: vector_index + embed_dim]
+
+                # Extract weights and bias from the linear laye
+                W = self.embeddings[vocab].weight.data
+                b = self.embeddings[vocab].bias.data
+
+                # Compute the pseudo-inverse of W
+                W_inv = torch.pinverse(W)
+
+                recovered_numbers = torch.matmul(x_embed - b, W_inv.t()).squeeze()
+                recovered_scaled = self.reverse_feature_scale(recovered_numbers)
+
+                data["nums"][mask] = recovered_scaled[mask]
+                vector_index += embed_dim
+
+        return data
     
     def decode_all(self,z, edge_index, sigmoid=True):
         e_recon = self.decoder(z, edge_index,sigmoid)
         e_recon = (e_recon > 0.5).float()
 
         x_recon = self.decoder.node_decoder(z, edge_index)
-        x_recon = self.reverse_embedding(x_recon)
+        x_recon = self.reverse_embed_x(x_recon)
 
         ef_recon = self.decoder.edge_decoder(z,edge_index)
 
@@ -290,15 +335,15 @@ class GraphVAE(VGAE):
         x_recon = self.decoder.node_decoder(z, pos_edge_index)
 
         # If it's onehot
-        feature_loss = F.cross_entropy(x_recon,x)
+        # feature_loss = F.cross_entropy(x_recon,x)
 
         # if it's embedded option 1
         # feature_loss = F.mse_loss(x_recon,x)
 
         # if it's embedded option 2
-        # similarity = F.cosine_similarity(x_recon,x, dim=1)
-        # target = torch.ones_like(similarity)
-        # feature_loss = F.cosine_embedding_loss(x_recon, x, target, margin=0.0)
+        similarity = F.cosine_similarity(x_recon,x, dim=1)
+        target = torch.ones_like(similarity)
+        feature_loss = F.cosine_embedding_loss(x_recon, x, target, margin=0.0)
 
         # Edge features loss
         ef_loss = 0
