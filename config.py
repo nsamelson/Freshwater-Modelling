@@ -13,15 +13,22 @@ CONFIG = {
     "num_layers":4,
     "out_channels":32,
     "hidden_channels":64,
-    "embedding_dims":200,
     "scale_grad_by_freq":True,
     "sample_edges":"sparse",
     "variational":False,
     "batch_norm":False,
     "force_undirected":True,
     "alpha":1,
-    "beta":0,
-    "gamma":0,
+    "beta":1,
+    "gamma":1,
+    "method":{
+        "onehot": {"concat": 256},
+        "embed": {},
+        "linear": {},
+        "scale": "log",
+        "loss":"cross_entropy"
+    },
+    "shuffle": False
 }
 
 MATHML_TAGS = [

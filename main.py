@@ -13,7 +13,7 @@ import utils.stats as stats
 import utils.plot as plot
 from models import train, search, test
 from torch.utils.data.dataset import random_split
-
+from torch_geometric.utils import negative_sampling
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
@@ -33,15 +33,27 @@ if __name__=="__main__":
     parser.add_argument("-fr", "--force_reload", action="store_true", help="Default False. Force reload the preprocessing")
     parser.add_argument("-d", "--debug", action="store_true", help="Default False. debug")
 
+    parser.add_argument("-e", "--epochs", help="Number of epochs for training", default=200, type=int)
+    # parser.add_argument("-oh", "--one_hot", help="OneHot method(s) as list", nargs='*', default=[], choices=["concat","tag","pos"])
+    # parser.add_argument("-em", "--embed", help="Embed method(s) as list", nargs='*', default=[], choices=["tag","concat","combined","mi","mo","mtext","mn"])
+    # parser.add_argument("-li", "--linear", help="Linear method(s) as list", nargs='*', default=[], choices=["mn"])
+    # parser.add_argument("-lo", "--loss", help="Loss function", default="cross_entropy", choices=["cross_entropy","mse","cosine"])
+
     args = parser.parse_args()
 
     # Get the args constants
-    xml_name = args.xml_name
     latex_set = args.latex_name
     vocab_type = args.vocab_name
+    xml_name = args.xml_name
+    model_name = args.model_name
     force_reload = args.force_reload
     debug = args.debug
-    model_name = args.model_name
+    epochs = args.epochs 
+    # one_hot = args.one_hot
+    # embed = args.embed
+    # linear = args.linear
+    # loss = args.loss
+
 
 
     seed_value = 42
@@ -63,57 +75,77 @@ if __name__=="__main__":
 
         # print(dataset[0].x, dataset[0].tag_index)
         # print(vocab.shape())
-        graph = dataset[1]
-        print(graph.nums)
+        # graph = dataset[1]
+        # print(graph.nums)
 
-        embedding_dim = 256
-        method = {
-            "onehot": [],
-            "embed": ["concat"], # "mi","mo","mtext","mn"
-            "linear": [],
-            "scale": "log"
-        }
-        encoder = GraphEncoder(embedding_dim,64,16,2,GCNConv)
-        decoder = GraphDecoder(embedding_dim,64,16,2,GCNConv)
-        model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,True)
+        # embedding_dim = 0
+        # method = {
+        #     "onehot": {},
+        #     "embed": {"concat":256,}, # "mi","mo","mtext","mn"
+        #     "linear": {},
+        #     "scale": "log",
+        #     "loss": "mse"
+        # }
+        # embedding_dim = sum(method["onehot"].values()) + sum(method["embed"].values()) + sum(method["linear"].values())
+
+        # encoder = GraphEncoder(embedding_dim,64,16,2,GCNConv)
+        # decoder = GraphDecoder(embedding_dim,64,16,2,GCNConv,edge_dim=1 )
+        # model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,True)
         
-        x = model.embed_x(graph.x,graph.tag_index, graph.pos, graph.nums)
-        print(x.shape, graph.edge_index.shape, graph.edge_attr.shape)
-        print(graph.edge_attr)
+        # x = model.embed_x(graph.x,graph.tag_index, graph.pos, graph.nums)
+        # print(x.shape, graph.edge_index.shape, graph.edge_attr.shape)
+        # print(graph.edge_attr)
 
-        z = model.encode(x, graph.edge_index, graph.edge_attr)
-        print(z.shape)
+        # z = model.encode(x, graph.edge_index, graph.edge_attr)
+        # print(z.shape)
 
-        x_p = model.decoder.node_decoder(z,graph.edge_index, graph.edge_attr)
-        print(x_p.shape)
+        # x_p = model.decoder.node_decoder(z,graph.edge_index, graph.edge_attr)
+        # print(x_p.shape)
 
-        edge_recon = model.decoder.edge_features_decoder(z,graph.edge_index)
-        print(edge_recon, edge_recon.shape)
+        # edge_recon = model.decoder.edge_decoder(z,graph.edge_index)
+        # print(edge_recon, edge_recon.shape)
 
-        loss = model.recon_full_loss(z, x, graph.edge_index, None, graph.edge_attr, 1,1, 1)
-        loss = loss + (1 / graph.num_nodes) * model.kl_loss()
-        print(loss)
+        # loss = model.recon_full_loss(z, x, graph.edge_index, None, graph.edge_attr, 1,1, 1)
+        # loss = loss + (1 / graph.num_nodes) * model.kl_loss()
+        # print(loss)
 
-        accuracy = model.calculate_accuracy(z,x,graph.edge_index,None, graph.tag_index, graph.edge_attr,)
-        print(accuracy)
+        # neg_edge_index = negative_sampling(graph.edge_index, graph.size(0))
+        # accuracy = model.calculate_accuracy(z,graph.edge_index,neg_edge_index, graph.x, graph.edge_attr,)
+        # print(accuracy)
+        # # stuff = model.test(z,x,graph.edge_index,neg_edge_index, graph.x, graph.edge_attr)
+        # # # auc, ap = model.test(z, graph.edge_index, neg_edge_index)
+        # # print("NODE, ADJ, EDGES: ",stuff)
 
+        # node_sim, adj_sim, edge_sim = model.calculate_similarity(z,x, graph.edge_index, graph.edge_attr)
+        # print("SIM: ", node_sim,adj_sim, edge_sim)
+
+        # node, adjency, edges = model.decode_all(z,graph.edge_index)
+        # print(graph.x)
+        # print(node)
 
 
     if args.train:
+
+        method = {
+            "onehot": {"concat":256},
+            "embed": {},
+            "linear": {},
+            "loss": "cross_entropy",
+            "scale": "log",
+        }
         if debug:
             config = {
-                "model_name": model_name,
-                "num_epochs": 20,
+                "model_name": "debug",
+                "xml_name": "debug",
+                "num_epochs": 10,
                 "latex_set":"OleehyO",
                 "vocab_type":"concat",
-                "embedding_dim":256,
-                "method":{
-                    "onehot": ["concat"],
-                }
+                "method": method,
+                "debug": debug
             }
             train.train_model(config)
         else:
-            train.main(model_name)
+            train.main(model_name, latex_set, vocab_type, xml_name, method, epochs, force_reload)
     
     if args.search:
         search.main()
