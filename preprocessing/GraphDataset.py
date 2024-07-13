@@ -21,8 +21,9 @@ ALGO_TYPES = [
 ]
 
 class GraphDataset(InMemoryDataset):
-    def __init__(self, root, vocab:VocabBuilder, graph_type = "Graph", max_num_nodes=50, representation="TreeGraph", transform=None, pre_transform=None, pre_filter=None,log=False, force_reload= False, debug=False):
+    def __init__(self, root, vocab:VocabBuilder, graph_type = "Graph", max_num_nodes=50, representation="TreeGraph", transform=None, pre_transform=None, pre_filter=None,log=False, force_reload= False, debug=False, verbose=False):
         self.debug = debug
+        self.verbose = verbose
         self.vocab = vocab      
         self.max_num_nodes = max_num_nodes
         self.graph_type = graph_type if graph_type in GRAPH_TYPES else "Graph"  
@@ -61,7 +62,8 @@ class GraphDataset(InMemoryDataset):
         data_list = []
         graph_list = []
 
-        for i, formula in enumerate(tqdm(root, desc="Generating Graphs", unit=" equations", total=len(root))):
+        iteration = tqdm(root, desc="Generating Graphs", unit=" equations", total=len(root)) if self.verbose else root
+        for i, formula in enumerate(iteration):
             if self.debug and i>= 10:
                 break
             

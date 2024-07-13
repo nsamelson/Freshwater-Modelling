@@ -51,10 +51,11 @@ DATASET_NAMES = {
 }
 
 class MathmlDataset(Dataset):
-    def __init__(self, xml_name:str, latex_set="OleehyO", force_reload=False, debug=False, select_raw=False, batch_size=1000):
+    def __init__(self, xml_name:str, latex_set="OleehyO", force_reload=False, debug=False, select_raw=False, batch_size=1000, verbose=False):
         self.latex_set = latex_set if latex_set in DATASET_NAMES.keys() else None
         self.force_reload = force_reload
         self.debug = debug
+        self.verbose = verbose
         self.select_raw = select_raw
         self.batch_size = batch_size
         self.root = None
@@ -97,7 +98,9 @@ class MathmlDataset(Dataset):
         self.root = ET.Element("span", attrib={"class": "katex"})
 
         # Go through by batch and convert to XML
-        for i,batch in enumerate(tqdm(process_equations_in_batches(all_equations,self.batch_size), desc="Generating XML",unit=" batch", total=int(len(all_equations)/self.batch_size))):
+        batch_equations = process_equations_in_batches(all_equations,self.batch_size)
+        iteration = tqdm(batch_equations, desc="Generating XML",unit=" batch", total=int(len(all_equations)/self.batch_size)) if self.verbose else batch_equations
+        for i,batch in enumerate(iteration):
             if self.debug and i>5:
                 break
 
