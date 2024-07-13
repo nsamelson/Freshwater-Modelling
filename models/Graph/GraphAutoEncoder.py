@@ -111,7 +111,7 @@ class GraphDecoder(torch.nn.Module):
 
 
 class GraphVAE(VGAE):
-    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_dim, embedding_method:dict, scale_grad_by_freq):
+    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_method:dict, scale_grad_by_freq):
         """
         Initializes the GraphVAE model.
 
@@ -130,7 +130,7 @@ class GraphVAE(VGAE):
         super(GraphVAE, self).__init__(encoder, decoder)
         self.num_embeddings = num_embeddings
         self.embedding_method = embedding_method
-        self.embedding_dim = embedding_dim
+        # self.embedding_dim = embedding_dim
         self.scale_grad = scale_grad_by_freq
         self.unknown_id = 1
         # self.device = device
@@ -198,9 +198,16 @@ class GraphVAE(VGAE):
                 if vocab == "tag":
                     embedded.append(self.embeddings["tag"](tag_index))
                 elif vocab == "concat":
-                    embedded.append(self.embeddings["concat"](x))
                     # limit x to avoid any overflow
-                    x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
+                    # x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
+                    try:
+                        mask = x >= embed_dim
+                        x[mask] = self.unknown_id
+                        embedded.append(self.embeddings["concat"](x))
+                        # x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
+                    except RuntimeError as e:
+                        print(f"BIG indexSelectLargeIndex ERROR HERE: {e}")
+                        raise
                 elif vocab == "pos":
                     embedded.append(self.embeddings["pos"](pos))
                 else:
@@ -340,7 +347,7 @@ class GraphVAE(VGAE):
         # Node features loss
         x_recon = self.decoder.node_decoder(z, pos_edge_index)
 
-        # If it's onehot
+        # If it's onehot or embedding, chose
         if self.embedding_method["loss"] == "cross_entropy":
             node_loss = F.cross_entropy(x_recon,x)
         elif self.embedding_method["loss"] == "mse":
@@ -405,7 +412,7 @@ class GraphVAE(VGAE):
 
         return node_accuracy, adjency_accuracy, edge_accuracy
     
-    def calculate_similarity(self, x, z, pos_edge_index, edge_weight=None):
+    def calculate_similarity(self, z, x, pos_edge_index, edge_weight=None):
 
         # Node similarity
         x_recon = self.decoder.node_decoder(z, pos_edge_index)
