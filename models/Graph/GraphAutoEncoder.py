@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv,GraphConv, InnerProductDecoder, BatchNorm, VGAE, MessagePassing
 from torch_geometric.utils import negative_sampling
-
+from sklearn.metrics import average_precision_score, roc_auc_score, accuracy_score
 from torch_geometric.utils import from_networkx
 from torch_geometric.data import DataLoader, Data
 # from torch.nn import BatchNorm1d
@@ -254,19 +254,19 @@ class GraphVAE(VGAE):
         """
         Reverses the embedding process to find the index
         """
-        print("X SHAPE:",  torch.zeros(x_recon.size(0), dtype=torch.long).shape)
         data = {
             "x": torch.zeros(x_recon.size(0), dtype=torch.long),
             "pos": None,
             "nums": torch.zeros(x_recon.size(0), dtype=torch.float32),
-            "tag": None
+            "tag": None,
+            # "raw" :{}
         }
         vector_index = 0
 
         if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
             for vocab, embed_dim in self.embedding_method["onehot"].items():
-                x_onehot = x_recon[vector_index: vector_index + embed_dim]
-                index = torch.argmax(x_onehot)
+                x_onehot = x_recon[:,vector_index: vector_index + embed_dim]
+                index = torch.argmax(torch.softmax(x_onehot, dim=1),dim=1)
                 if vocab == "tag":
                     data["tag"] = index
                 elif vocab == "concat":
@@ -283,16 +283,19 @@ class GraphVAE(VGAE):
 
                 similarity = F.cosine_similarity(x_embed.unsqueeze(1),self.embeddings[vocab].weight.unsqueeze(0), dim=2)
                 index = similarity.argmax(dim=1)
-
+                
                 if vocab == "tag":
                     data["tag"] = index
+                    # data["raw"]["tag"] = similarity
                 elif vocab in ["concat","combined"]:
                     data["x"] = index
+                    # data["raw"]["x"] = similarity
                 elif vocab in ["mi","mn","mtext","mo"]:
                     # create a mask to apply the found index only on the data 
                     # for which the tag is equal to the vocab
                     mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
                     data["x"][mask] = index[mask]
+                    # data["raw"][vocab][mask] = similarity[mask]
 
                 vector_index += embed_dim
 
@@ -316,15 +319,18 @@ class GraphVAE(VGAE):
         return data
     
     def decode_all(self,z, edge_index, sigmoid=True):
-        e_recon = self.decoder(z, edge_index,sigmoid)
-        e_recon = (e_recon > 0.5).float()
+        # Adjency matrix
+        a_recon = self.decoder(z, edge_index,sigmoid)
+        a_recon = (a_recon > 0.5).float()
 
+        # Nodes features
         x_recon = self.decoder.node_decoder(z, edge_index)
         x_recon = self.reverse_embed_x(x_recon)
 
-        ef_recon = self.decoder.edge_decoder(z,edge_index)
+        # Edges features
+        e_recon = self.decoder.edge_decoder(z,edge_index)
 
-        return x_recon, e_recon, ef_recon
+        return x_recon, a_recon, e_recon
     
     def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, edge_weight = None, alpha = 1, beta = 0, gamma = 0):
         
@@ -335,30 +341,31 @@ class GraphVAE(VGAE):
         x_recon = self.decoder.node_decoder(z, pos_edge_index)
 
         # If it's onehot
-        # feature_loss = F.cross_entropy(x_recon,x)
-
-        # if it's embedded option 1
-        # feature_loss = F.mse_loss(x_recon,x)
-
-        # if it's embedded option 2
-        similarity = F.cosine_similarity(x_recon,x, dim=1)
-        target = torch.ones_like(similarity)
-        feature_loss = F.cosine_embedding_loss(x_recon, x, target, margin=0.0)
+        if self.embedding_method["loss"] == "cross_entropy":
+            node_loss = F.cross_entropy(x_recon,x)
+        elif self.embedding_method["loss"] == "mse":
+            node_loss = F.mse_loss(x_recon,x)
+        elif self.embedding_method["loss"] == "cosine":
+            similarity = F.cosine_similarity(x_recon,x, dim=1)
+            target = torch.ones_like(similarity)
+            node_loss = F.cosine_embedding_loss(x_recon, x, target, margin=0.0)
+        else:
+            raise ValueError(f"Invalid embedding method. Expected one of {EMBEDDINGS['loss']}, but got {self.embedding_method['loss']}")
 
         # Edge features loss
-        ef_loss = 0
+        edge_loss = 0
         if edge_weight is not None:
             decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
             
             if self.decoder.edge_dim == 1:
-                ef_loss = F.binary_cross_entropy_with_logits(decoded_ef,edge_weight.float())
+                edge_loss = F.binary_cross_entropy_with_logits(decoded_ef,edge_weight.float())
             else:
-                ef_loss = F.cross_entropy(decoded_ef,edge_weight.float())
+                edge_loss = F.cross_entropy(decoded_ef,edge_weight.float())
 
-        return alpha * adj_loss + beta * feature_loss + gamma * ef_loss
+        return alpha * adj_loss + beta * node_loss + gamma * edge_loss
 
 
-    def calculate_accuracy(self, z, x, pos_edge_index, neg_edge_index, indices, edge_weight=None,):
+    def calculate_accuracy(self, z, pos_edge_index, neg_edge_index, x_indices, edge_weight=None,):
 
         # Edge index accuracy
         if neg_edge_index is None:
@@ -372,28 +379,98 @@ class GraphVAE(VGAE):
         true_positives = pos_pred_binary.sum().item()
         true_negatives = neg_pred_binary.sum().item()
         total_edges = pos_edge_index.size(1) + neg_edge_index.size(1)
-        edge_accuracy = (true_positives + true_negatives) / total_edges
+        adjency_accuracy = (true_positives + true_negatives) / total_edges
 
         # Node features accuracy
         x_recon = self.decoder.node_decoder(z, pos_edge_index)
+        recon_data = self.reverse_embed_x(x_recon)
+        recon_indices = recon_data["x"]
+        node_accuracy = (recon_indices == x_indices).float().mean().item()
 
-        similarity = torch.matmul(x_recon, x.T)
-        recon_indices = similarity.argmax(dim=1)
-        node_accuracy = (recon_indices == indices).float().mean()
-
+        # acc = accuracy_score(indices.cpu().detach().numpy(),recon_indices.cpu().detach().numpy())
+        # print("AACCC:", acc, node_accuracy)
 
         # Edge features accuracy
-        edge_features_accuracy = None
+        edge_accuracy = None
         if edge_weight is not None:
             decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
             if self.decoder.edge_dim == 1:
                 predicted_edges = (torch.sigmoid(decoded_ef) > 0.5).float()
                 correct_edges = (predicted_edges == edge_weight).sum().item()
-                edge_features_accuracy = correct_edges / edge_weight.size(0)
+                edge_accuracy = correct_edges / edge_weight.size(0)
             else:
                 _, predicted_edges = torch.max(decoded_ef, dim=1)
                 correct_edges = (predicted_edges == edge_weight).sum().item()
-                edge_features_accuracy = correct_edges / edge_weight.size(0)
+                edge_accuracy = correct_edges / edge_weight.size(0)
 
-        return node_accuracy, edge_accuracy, edge_features_accuracy
+        return node_accuracy, adjency_accuracy, edge_accuracy
+    
+    def calculate_similarity(self, x, z, pos_edge_index, edge_weight=None):
 
+        # Node similarity
+        x_recon = self.decoder.node_decoder(z, pos_edge_index)
+        node_similarity = F.cosine_similarity(x_recon, x,dim=1).mean().item()
+
+        adj_similarity = self.decoder(z, pos_edge_index, True).float().mean().item()
+        
+        edge_similarity = None
+        if edge_weight is not None:
+            dim = 0 if self.decoder.edge_dim == 1 else 1 # if binary edge weight, check on a lower dim
+            e_recon = self.decoder.edge_decoder(z, pos_edge_index)
+            edge_similarity = F.cosine_similarity(e_recon,edge_weight, dim=dim).mean().item()
+
+
+        return node_similarity, adj_similarity, edge_similarity
+
+    
+    # def test(self, z, x, pos_edge_index, neg_edge_index, indices, edge_weight=None):
+    #     """
+    #     Compute the ROC curve (AUC) and Average precision (AP)
+    #     """
+        
+
+    #     # Node AUC and AP
+    #     pos_n_recon =  self.decoder.node_decoder(z, pos_edge_index)
+    #     neg_n_recon =  self.decoder.node_decoder(z, neg_edge_index)
+
+    #     pos_n_sim = F.cosine_similarity(pos_n_recon, x, dim=1)
+    #     neg_n_sim = F.cosine_similarity(neg_n_recon, x, dim=1)
+
+    #     y_true = torch.cat([torch.ones_like(pos_n_sim), torch.zeros_like(neg_n_sim)])
+    #     y_scores = torch.cat([pos_n_sim, neg_n_sim])
+
+    #     y_true = indices
+    #     y, pred = y_true.detach().cpu().numpy(), y_scores.detach().cpu().numpy()
+
+    #     node_auc = roc_auc_score(y, pred,)
+    #     node_ap = average_precision_score(y, pred)
+
+    #     # Adjency AUC and AP
+    #     pos_y = z.new_ones(pos_edge_index.size(1))
+    #     neg_y = z.new_zeros(neg_edge_index.size(1))
+    #     y = torch.cat([pos_y, neg_y], dim=0)
+
+    #     pos_pred = self.decoder(z, pos_edge_index, sigmoid=True)
+    #     neg_pred = self.decoder(z, neg_edge_index, sigmoid=True)
+    #     pred = torch.cat([pos_pred, neg_pred], dim=0)
+
+    #     y, pred = y.detach().cpu().numpy(), pred.detach().cpu().numpy()
+
+    #     adj_auc = roc_auc_score(y, pred)
+    #     adj_ap = average_precision_score(y, pred)
+
+    #     # Edges AUC and AP
+    #     if edge_weight is not None:
+    #         dim = 0 if self.decoder.edge_dim == 1 else 1
+
+    #         y_true = edge_weight
+    #         y_scores = self.decoder.edge_decoder(z, pos_edge_index)
+
+    #         y, pred = y_true.detach().cpu().numpy(), y_scores.detach().cpu().numpy()
+
+    #         e_auc = roc_auc_score(y, pred)
+    #         e_ap = average_precision_score(y, pred)
+
+    
+
+    #     return node_auc, node_ap, adj_auc, adj_ap, e_auc, e_ap
