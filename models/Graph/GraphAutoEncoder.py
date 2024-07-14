@@ -14,7 +14,7 @@ from torch import Tensor
 from config import MATHML_TAGS
 
 # MAX_LOGSTD = 10
-# EPS = 1e-15
+EPS = 1e-15
 
 EMBEDDINGS = [
     "OHE_Concat",
@@ -84,6 +84,9 @@ class GraphDecoder(torch.nn.Module):
 
     def forward(self, *args,**kwargs):
         return self.adjency_decoder(*args,**kwargs) 
+    
+    def forward_all(self, *args,**kwargs):
+        return self.adjency_decoder.forward_all(*args,**kwargs) 
 
     
     def node_decoder(self, z, edge_index, edge_weight=None):
@@ -111,7 +114,7 @@ class GraphDecoder(torch.nn.Module):
 
 
 class GraphVAE(VGAE):
-    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_method:dict, scale_grad_by_freq):
+    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_method:dict, scale_grad_by_freq: bool, sparse_edges:bool):
         """
         Initializes the GraphVAE model.
 
@@ -132,6 +135,7 @@ class GraphVAE(VGAE):
         self.embedding_method = embedding_method
         # self.embedding_dim = embedding_dim
         self.scale_grad = scale_grad_by_freq
+        self.sparse_edges = sparse_edges
         self.unknown_id = 1
         # self.device = device
 
@@ -261,19 +265,23 @@ class GraphVAE(VGAE):
         """
         Reverses the embedding process to find the index
         """
+        onehot_index, embed_index, linear_index = 0, 0, 0
+        vector_index = 0
         data = {
             "x": torch.zeros(x_recon.size(0), dtype=torch.long),
             "pos": None,
             "nums": torch.zeros(x_recon.size(0), dtype=torch.float32),
             "tag": None,
-            # "raw" :{}
         }
-        vector_index = 0
+        raw_data = {}
 
         if "onehot" in self.embedding_method and len(self.embedding_method["onehot"]) != 0:
+            onehot_index = vector_index
             for vocab, embed_dim in self.embedding_method["onehot"].items():
                 x_onehot = x_recon[:,vector_index: vector_index + embed_dim]
-                index = torch.argmax(torch.softmax(x_onehot, dim=1),dim=1)
+                soft_oh = torch.softmax(x_onehot, dim=1)
+                index = torch.argmax(soft_oh,dim=1)
+
                 if vocab == "tag":
                     data["tag"] = index
                 elif vocab == "concat":
@@ -284,7 +292,10 @@ class GraphVAE(VGAE):
                 # update index position in the vector
                 vector_index += embed_dim
 
+            raw_data["onehot"] = torch.softmax(x_recon[:,onehot_index:vector_index], dim=1)
+
         if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
+            embed_index =  vector_index
             for vocab, embed_dim in self.embedding_method["embed"].items():
                 x_embed = x_recon[:,vector_index: vector_index + embed_dim]
 
@@ -293,20 +304,18 @@ class GraphVAE(VGAE):
                 
                 if vocab == "tag":
                     data["tag"] = index
-                    # data["raw"]["tag"] = similarity
                 elif vocab in ["concat","combined"]:
                     data["x"] = index
-                    # data["raw"]["x"] = similarity
                 elif vocab in ["mi","mn","mtext","mo"]:
-                    # create a mask to apply the found index only on the data 
-                    # for which the tag is equal to the vocab
+                    # create a mask to apply the found index only on the data for which the tag is equal to the vocab
                     mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
                     data["x"][mask] = index[mask]
-                    # data["raw"][vocab][mask] = similarity[mask]
 
                 vector_index += embed_dim
+            raw_data["embed"] = x_recon[:,embed_index:vector_index]
 
         if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
+            linear_index = vector_index
             for vocab, embed_dim in self.embedding_method["linear"].items():
                 x_embed = x_recon[:,vector_index: vector_index + embed_dim]
 
@@ -323,29 +332,44 @@ class GraphVAE(VGAE):
                 data["nums"][mask] = recovered_scaled[mask]
                 vector_index += embed_dim
 
-        return data
+            raw_data["linear"] = x_recon[:,linear_index:vector_index]
+
+        return data, raw_data
     
     def decode_all(self,z, edge_index, sigmoid=True):
-        # Adjency matrix
-        a_recon = self.decoder(z, edge_index,sigmoid)
-        a_recon = (a_recon > 0.5).float()
 
-        # Nodes features
-        x_recon = self.decoder.node_decoder(z, edge_index)
-        x_recon = self.reverse_embed_x(x_recon)
+        # Adjency matrix
+        if self.sparse_edges:
+            adj = self.decoder(z, edge_index,sigmoid)
+            adj = (adj > 0.5).float()
+            
+            edge_index_recon = edge_index[:, adj > 0] # Remove edges with zero probability
+        else:
+            adj = self.decoder.forward_all(z,sigmoid)
+            adj = (adj > 0.5).float()
+
+            edge_index_recon = torch.nonzero(adj, as_tuple=False).t()
+        
 
         # Edges features
-        e_recon = self.decoder.edge_decoder(z,edge_index)
+        e_recon = self.decoder.edge_decoder(z,edge_index_recon)
 
-        return x_recon, a_recon, e_recon
+        # Nodes features
+        x_recon = self.decoder.node_decoder(z, edge_index_recon, e_recon)
+        # x_recon = self.reverse_embed_x(x_recon)
+
+        return x_recon, edge_index_recon, e_recon
     
     def recon_full_loss(self, z, x, pos_edge_index, neg_edge_index, edge_weight = None, alpha = 1, beta = 0, gamma = 0):
         
         # Compute link loss
         adj_loss = self.recon_loss(z, pos_edge_index,neg_edge_index)
+        # pos_loss = -torch.log(self.decoder(z, pos_edge_index, sigmoid=True) + EPS).mean()
+        # neg_loss = -torch.log(1 - self.decoder.forward_all(z, sigmoid=True) + EPS).mean()
+        # adj_loss = pos_loss + neg_loss
 
         # Node features loss
-        x_recon = self.decoder.node_decoder(z, pos_edge_index)
+        x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
 
         # If it's onehot or embedding, chose
         if self.embedding_method["loss"] == "cross_entropy":
@@ -371,63 +395,104 @@ class GraphVAE(VGAE):
 
         return alpha * adj_loss + beta * node_loss + gamma * edge_loss
 
+    def test_nodes(self,z, pos_edge_index, x, x_indices, edge_weight=None):
 
-    def calculate_accuracy(self, z, pos_edge_index, neg_edge_index, x_indices, edge_weight=None,):
+        x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
 
-        # Edge index accuracy
-        if neg_edge_index is None:
-            neg_edge_index = negative_sampling(pos_edge_index, z.size(0))
+        # x_recon, _, _ = self.decode_all(z, pos_edge_index)
+        recon_data, raw_data = self.reverse_embed_x(x_recon)
 
-        pos_pred = self.decoder(z, pos_edge_index, sigmoid=True)
-        neg_pred = self.decoder(z, neg_edge_index, sigmoid=True)
-        pos_pred_binary = (pos_pred > 0.5).float()
-        neg_pred_binary = (neg_pred <= 0.5).float()
+        similarity = 0
+        accuracy = 0
+        num_embeddings = len(raw_data.keys()) 
+        vector_index = 0
 
-        true_positives = pos_pred_binary.sum().item()
-        true_negatives = neg_pred_binary.sum().item()
-        total_edges = pos_edge_index.size(1) + neg_edge_index.size(1)
-        adjency_accuracy = (true_positives + true_negatives) / total_edges
+        # Compute similarities per embedding part
+        for key, x_value in raw_data.items():
+            x_cropped = x[:,vector_index: vector_index + x_value.size(1)]
+            # one hot Jaccard Similarity
+            if key =="onehot" and x_value is not None:
+                intersection = (x_value * x_cropped).sum(dim=1).float()
+                union = ((x_value + x_cropped) > 0).sum(dim=1).float()
+                similarity += (intersection / union).mean().item()
+            
+            # cosine similarity for embedding
+            elif key =="embed" and x_value is not None:
+                similarity += F.cosine_similarity(x_value, x_cropped,dim=1).mean().item()
 
-        # Node features accuracy
-        x_recon = self.decoder.node_decoder(z, pos_edge_index)
-        recon_data = self.reverse_embed_x(x_recon)
-        recon_indices = recon_data["x"]
-        node_accuracy = (recon_indices == x_indices).float().mean().item()
+            elif key == "linear" and x_value is not None:
+                euclidean_dist = torch.norm(x_value - x_cropped,p=2, dim=1)
+                similarity += 1 / (1 + euclidean_dist).mean().item()
 
-        # acc = accuracy_score(indices.cpu().detach().numpy(),recon_indices.cpu().detach().numpy())
-        # print("AACCC:", acc, node_accuracy)
-
-        # Edge features accuracy
-        edge_accuracy = None
-        if edge_weight is not None:
-            decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
-            if self.decoder.edge_dim == 1:
-                predicted_edges = (torch.sigmoid(decoded_ef) > 0.5).float()
-                correct_edges = (predicted_edges == edge_weight).sum().item()
-                edge_accuracy = correct_edges / edge_weight.size(0)
-            else:
-                _, predicted_edges = torch.max(decoded_ef, dim=1)
-                correct_edges = (predicted_edges == edge_weight).sum().item()
-                edge_accuracy = correct_edges / edge_weight.size(0)
-
-        return node_accuracy, adjency_accuracy, edge_accuracy
-    
-    def calculate_similarity(self, z, x, pos_edge_index, edge_weight=None):
-
-        # Node similarity
-        x_recon = self.decoder.node_decoder(z, pos_edge_index)
-        node_similarity = F.cosine_similarity(x_recon, x,dim=1).mean().item()
-
-        adj_similarity = self.decoder(z, pos_edge_index, True).float().mean().item()
+            vector_index +=  x_value.size(1)
         
-        edge_similarity = None
-        if edge_weight is not None:
-            dim = 0 if self.decoder.edge_dim == 1 else 1 # if binary edge weight, check on a lower dim
-            e_recon = self.decoder.edge_decoder(z, pos_edge_index)
-            edge_similarity = F.cosine_similarity(e_recon,edge_weight, dim=dim).mean().item()
+        similarity /= num_embeddings
 
 
-        return node_similarity, adj_similarity, edge_similarity
+        # Accuracy
+        recon_indices = recon_data["x"]
+        accuracy = (recon_indices == x_indices).float().mean().item()
+        # TODO: add accuracy for pos and tags
+
+        return accuracy, similarity
+
+    # def calculate_accuracy(self, z, pos_edge_index, neg_edge_index, x_indices, edge_weight=None,):
+
+    #     # Edge index accuracy
+    #     # if neg_edge_index is None:
+    #     #     neg_edge_index = negative_sampling(pos_edge_index, z.size(0))
+
+    #     # pos_pred = self.decoder(z, pos_edge_index, sigmoid=True)
+    #     # neg_pred = self.decoder(z, neg_edge_index, sigmoid=True)
+    #     # pos_pred_binary = (pos_pred > 0.5).float()
+    #     # neg_pred_binary = (neg_pred <= 0.5).float()
+
+    #     # true_positives = pos_pred_binary.sum().item()
+    #     # true_negatives = neg_pred_binary.sum().item()
+    #     # total_edges = pos_edge_index.size(1) + neg_edge_index.size(1)
+    #     # adjency_accuracy = (true_positives + true_negatives) / total_edges
+
+    #     # Node features accuracy
+    #     x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
+    #     recon_data = self.reverse_embed_x(x_recon)
+    #     recon_indices = recon_data["x"]
+    #     node_accuracy = (recon_indices == x_indices).float().mean().item()
+
+    #     # acc = accuracy_score(indices.cpu().detach().numpy(),recon_indices.cpu().detach().numpy())
+    #     # print("AACCC:", acc, node_accuracy)
+
+    #     # Edge features accuracy
+    #     # edge_accuracy = None
+    #     # if edge_weight is not None:
+    #     #     decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
+    #     #     if self.decoder.edge_dim == 1:
+    #     #         predicted_edges = (torch.sigmoid(decoded_ef) > 0.5).float()
+    #     #         correct_edges = (predicted_edges == edge_weight).sum().item()
+    #     #         edge_accuracy = correct_edges / edge_weight.size(0)
+    #     #     else:
+    #     #         _, predicted_edges = torch.max(decoded_ef, dim=1)
+    #     #         correct_edges = (predicted_edges == edge_weight).sum().item()
+    #     #         edge_accuracy = correct_edges / edge_weight.size(0)
+
+    #     return node_accuracy #, adjency_accuracy, edge_accuracy
+    
+    # def calculate_similarity(self, z, x, pos_edge_index, edge_weight=None):
+
+    #     # Node similarity
+    #     x_recon = self.decoder.node_decoder(z, pos_edge_index)
+    #     node_similarity = F.cosine_similarity(x_recon, x,dim=1).mean().item()
+
+    #     # adj_similarity = self.decoder(z, pos_edge_index, True).float().mean().item()
+        
+    #     # edge_similarity = None
+    #     # if edge_weight is not None:
+    #     #     dim = 0 if self.decoder.edge_dim == 1 else 1 # if binary edge weight, check on a lower dim
+    #     #     e_recon = self.decoder.edge_decoder(z, pos_edge_index)
+    #     #     edge_similarity = F.cosine_similarity(e_recon,edge_weight, dim=dim).mean().item()
+
+
+    #     return node_similarity #, adj_similarity, edge_similarity
+    
 
     
     # def test(self, z, x, pos_edge_index, neg_edge_index, indices, edge_weight=None):

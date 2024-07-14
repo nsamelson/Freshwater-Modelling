@@ -14,7 +14,6 @@ CONFIG = {
     "out_channels":32,
     "hidden_channels":64,
     "scale_grad_by_freq":True,
-    "sample_edges":"sparse",
     "variational":False,
     "batch_norm":False,
     "force_undirected":True,
@@ -28,7 +27,14 @@ CONFIG = {
         "scale": "log",
         "loss":"cross_entropy"
     },
-    "shuffle": False
+    "shuffle": False,
+    "max_num_nodes": 100,
+    "latex_set":"OleehyO",
+    "vocab_type":"concat",
+    "xml_name":"default",
+    "force_reload": False,
+    "sample_edges":"sparse",
+    "gen_sparse_edges": True,
 }
 
 MATHML_TAGS = [

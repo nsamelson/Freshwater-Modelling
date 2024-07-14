@@ -137,7 +137,7 @@ if __name__=="__main__":
             config = {
                 "model_name": "debug",
                 "xml_name": "debug",
-                "num_epochs": 10,
+                "num_epochs": 1,
                 "latex_set":"OleehyO",
                 "vocab_type":"concat",
                 "method": method,
@@ -157,4 +157,9 @@ if __name__=="__main__":
         # stats.xml_occurences()
         # stats.count_text_occurences_per_tag()
         # stats.extract_data_from_search()
-        plot.plot_hyperparam_search("trained_models/GAE_search_channel_dims")
+        # plot.plot_hyperparam_search("trained_models/GAE_search_channel_dims")
+        metrics = {
+            "loss": [], "train_auc": [], "train_ap": [], "train_acc": [], "train_sim": [], 
+            "val_loss": [], "val_auc": [], "val_ap": [], "val_acc": [], "val_sim": []
+        }
+        plot.plot_training_history(metrics,"something")

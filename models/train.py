@@ -37,7 +37,7 @@ from models.Graph.GraphAutoEncoder import GraphEncoder, GraphVAE, GraphDecoder
 import random
 # from tensorboardX import SummaryWriter
 
-from utils.plot import plot_loss_graph, plot_training_graphs
+from utils.plot import plot_loss_graph, plot_training_graphs, plot_training_history
 from utils.save import json_dump
 import pandas as pd
 import tempfile
@@ -67,7 +67,6 @@ def main(model_name="GraphVAE_new",latex_set = "OleehyO",vocab_type="concat", xm
     config = {
         "model_name": model_name,
         "num_epochs": epochs,
-        "lr": 1e-3,
         "variational": True,
         "alpha": 1,
         "beta": 1,
@@ -134,7 +133,7 @@ def main(model_name="GraphVAE_new",latex_set = "OleehyO",vocab_type="concat", xm
         except:
             pass
 
-        metrics_head = results.keys()[:4]
+        metrics_head = results.keys()[:10]
         history = {key:list(results[key]) for key in metrics_head}
         # history["params"] = params
         
@@ -146,6 +145,7 @@ def main(model_name="GraphVAE_new",latex_set = "OleehyO",vocab_type="concat", xm
         json_dump(f'{dir_path}/history.json',history)
         json_dump(f'{dir_path}/params.json',full_config)
         # plot_training_graphs(history,dir_path) # TODO: plot graphs
+        plot_training_history(history, dir_path)
     except Exception as e:
         print(f"Couldn't save history and plot graphs because of {e}")
 
@@ -192,21 +192,28 @@ def train_model(train_config: dict):
     xml_name = config.get("xml_name", "debug")
     force_reload = config.get("force_reload", True)
     epochs = config.get("num_epochs",200)
+    max_num_nodes = config.get("max_num_nodes",40)
+    # sample_edges = config.get("sample_edges","sparse")
+    sparse_edges = config.get("gen_sparse_edges",True)
+
+    print("Loading dataset...")
 
     # load and setup dataset
     mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug)
     vocab = VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload)
-    dataset = GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug)
+    dataset = GraphDataset(mathml.xml_dir,vocab, max_num_nodes= max_num_nodes, force_reload=force_reload, debug=debug)
 
     train, val, _ = dataset.split(shuffle=shuffle)
     
+    print(f"MathML dataset size: {len(mathml)} equations")
+    print(f"Dataset sizes: train= {len(train)} graphs, val= {len(val)} graphs. Max number of nodes per graph= {max_num_nodes}")
 
     # load models
     embedding_dim = sum(method["onehot"].values()) + sum(method["embed"].values()) + sum(method["linear"].values())
 
     encoder = GraphEncoder(embedding_dim,hidden_channels,out_channels,layers,layer_type,batch_norm)
     decoder = GraphDecoder(embedding_dim,hidden_channels,out_channels,layers,layer_type, edge_dim=1,batch_norm=batch_norm)
-    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq)
+    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq, sparse_edges)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
     model.to(device)
@@ -215,6 +222,7 @@ def train_model(train_config: dict):
     train_loader = DataLoader(train, batch_size=config.get("batch_size",256), shuffle=True, num_workers=8)
     val_loader = DataLoader(val, batch_size=config.get("batch_size",256), shuffle=False, num_workers=8)
     # test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=8)
+    # print("Number of nodes per batch: ", train_loader.dataset.))
 
     # Get checkpoint
     start = 0
@@ -231,14 +239,13 @@ def train_model(train_config: dict):
     print("Starting training...")
     for epoch in range(start,epochs):
 
-        train_loss, train_acc, train_sim = train_one_epoch(model,optimizer,train_loader,device,config)
-        val_loss, val_auc, val_ap, acc, node_acc, adj_acc, edge_acc, sim, node_sim, adj_sim, edge_sim = validate(model,val_loader,device,config)
+        train_loss, train_auc, train_ap, train_acc, train_sim = train_one_epoch(model,optimizer,train_loader,device,config)
+        val_loss, val_auc, val_ap, val_acc, val_sim = validate(model,val_loader,device,config)
 
-        metrics = {"loss": train_loss, "train_acc": train_acc, "train_sim": train_sim,
-                   "val_loss": val_loss, "val_auc": val_auc, "val_ap": val_ap, 
-                   "val_acc": acc, "val_node_acc": node_acc, "val_adj_acc": adj_acc, "val_edge_acc": edge_acc, 
-                   "val_sim": sim, "val_node_sim": node_sim, "val_adj_sim": adj_sim, "val_edge_sim": edge_sim
-            }
+        metrics = {
+            "loss": train_loss, "train_auc": train_auc, "train_ap": train_ap, "train_acc": train_acc, "train_sim": train_sim, 
+            "val_loss": val_loss, "val_auc": val_auc, "val_ap": val_ap, "val_acc": val_acc, "val_sim": val_sim
+        }
         
         # session.report(metrics)
         with tempfile.TemporaryDirectory() as tempdir:
@@ -255,25 +262,31 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
     total_train_loss = 0
     total_acc = 0
     total_sim = 0
+    total_auc = 0
+    total_ap = 0
 
     # Getting params
     variational = config.get("variational",False)
     force_undirected = config.get("force_undirected",True)
-    neg_sampling_method = config.get("neg_sampling_method","sparse")
+    neg_sampling_method = config.get("sample_edges","sparse")
     alpha = config.get("alpha",1)
     beta = config.get("beta",0)
     gamma = config.get("gamma",0)
     
-    for batch in train_loader:
+    for i,batch in enumerate(train_loader):
+        # if i % 2 == 0:
+        #     print(f"Training batch #{i}..")
+        
         optimizer.zero_grad()
         batch = batch.to(device)
 
         # Generate negative edges
-        pos_edge_index = batch.edge_index.to(device)
+        # pos_edge_index = batch.edge_index.to(device)
+        num_edges = batch.num_nodes**2 if neg_sampling_method == "dense" else batch.edge_index.size(1)
         neg_edge_index = negative_sampling(
-            edge_index=pos_edge_index, 
+            edge_index=batch.edge_index, 
             num_nodes=batch.num_nodes, 
-            num_neg_samples=pos_edge_index.size(1),
+            num_neg_samples=num_edges,
             force_undirected=force_undirected,
             method=neg_sampling_method
         ).to(device)
@@ -282,28 +295,31 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
         z = model.encode(x, batch.edge_index, batch.edge_attr)
 
         # Loss calculation
-        loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index, batch.edge_attr, alpha, beta, gamma)
-
+        loss = model.recon_full_loss(z, x, batch.edge_index, neg_edge_index, batch.edge_attr, alpha, beta, gamma)
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
+
         loss.backward()
         optimizer.step()
         total_train_loss += loss.item()
 
-        # Accuracy
-        node_acc, adj_acc, edge_acc = model.calculate_accuracy(z, pos_edge_index, neg_edge_index, batch.x, batch.edge_attr)
-        total_acc += node_acc * adj_acc * edge_acc
+        # AUC, AP
+        auc, ap = model.test(z, batch.edge_index, neg_edge_index)
+        total_auc += auc
+        total_ap += ap  
 
-        # Similarity
-        node_sim, adj_sim, edge_sim = model.calculate_similarity(z, x, pos_edge_index, batch.edge_attr)
-        total_sim += node_sim * adj_sim * edge_sim
-
+        # Accuracy and similarity
+        acc, sim = model.test_nodes(z, batch.edge_index, x, batch.x, batch.edge_attr)
+        total_acc += acc
+        total_sim += sim
     
     avg_train_loss = total_train_loss / len(train_loader)
+    avg_auc = total_auc / len(train_loader)
+    avg_ap = total_ap / len(train_loader)
     avg_acc = total_acc / len(train_loader)
     avg_sim = total_sim / len(train_loader)
 
-    return avg_train_loss, avg_acc, avg_sim
+    return avg_train_loss, avg_auc, avg_ap, avg_acc, avg_sim
 
 def validate(model:GraphVAE,val_loader,device,config): # variational=False,force_undirected=True,neg_sampling_method="sparse"
     model.eval()
@@ -311,18 +327,13 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
     total_auc = 0
     total_ap = 0
     total_acc = 0
-    total_node_acc = 0
-    total_adj_acc = 0
-    total_edge_acc = 0
     total_sim = 0
-    total_node_sim = 0
-    total_adj_sim = 0
-    total_edge_sim = 0
+
 
     # Getting params
     variational = config.get("variational",False)
     force_undirected = config.get("force_undirected",True)
-    neg_sampling_method = config.get("neg_sampling_method","sparse")
+    neg_sampling_method = config.get("sample_edges","sparse")
     alpha = config.get("alpha",1)
     beta = config.get("beta",0)
     gamma = config.get("gamma",0)
@@ -333,10 +344,11 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
 
             # Generate negative edges
             pos_edge_index = batch.edge_index
+            num_edges = batch.num_nodes**2 if neg_sampling_method == "dense" else pos_edge_index.size(1)
             neg_edge_index = negative_sampling(
                 edge_index=pos_edge_index, 
                 num_nodes=batch.num_nodes, 
-                num_neg_samples=pos_edge_index.size(1),
+                num_neg_samples=num_edges,
                 force_undirected=force_undirected,
                 method=neg_sampling_method
             ).to(device)
@@ -355,34 +367,18 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
             total_auc += auc
             total_ap += ap  
 
-            # Accuracy  
-            node_acc, adj_acc, edge_acc = model.calculate_accuracy(z, pos_edge_index, neg_edge_index, batch.x, batch.edge_attr)
-            total_acc += node_acc * adj_acc * edge_acc
-            total_node_acc += node_acc
-            total_adj_acc += adj_acc
-            total_edge_acc += edge_acc
-
-
-            node_sim, adj_sim, edge_sim = model.calculate_similarity(z, x, pos_edge_index, batch.edge_attr)
-            total_sim += node_sim * adj_sim * edge_sim
-            total_node_sim += node_sim
-            total_adj_sim += adj_sim
-            total_edge_sim += edge_sim
+            # Accuracy and similarity
+            acc, sim = model.test_nodes(z, pos_edge_index,x,batch.x, batch.edge_attr)
+            total_acc += acc
+            total_sim += sim
 
     avg_val_loss = total_val_loss / len(val_loader)
     avg_auc = total_auc / len(val_loader)
     avg_ap = total_ap / len(val_loader)
-
     avg_acc = total_acc / len(val_loader)
-    avg_node_acc = total_node_acc / len(val_loader)
-    avg_adj_acc = total_adj_acc / len(val_loader)
-    avg_edge_acc = total_edge_acc / len(val_loader)
-
     avg_sim = total_sim / len(val_loader)
-    avg_node_sim = total_node_sim / len(val_loader)
-    avg_adj_sim = total_adj_sim / len(val_loader)
-    avg_edge_sim = total_edge_sim / len(val_loader)
 
-    return avg_val_loss, avg_auc, avg_ap, avg_acc, avg_node_acc, avg_adj_acc, avg_edge_acc, avg_sim, avg_node_sim, avg_adj_sim, avg_edge_sim
+
+    return avg_val_loss, avg_auc, avg_ap, avg_acc, avg_sim
 
 
