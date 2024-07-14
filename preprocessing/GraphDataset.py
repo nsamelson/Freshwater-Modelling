@@ -36,7 +36,7 @@ class GraphDataset(InMemoryDataset):
 
         super(GraphDataset, self).__init__(root, transform, pre_transform,pre_filter,log,force_reload)
         # self.data, self.slices = torch.load(self.processed_paths[0])
-        self.data, self.slices, self._graph_list = torch.load(self.processed_paths[0])
+        self.data, self.slices, self._graph_list = self.load_data(force_reload)
     
     @property
     def raw_file_names(self):
@@ -48,6 +48,11 @@ class GraphDataset(InMemoryDataset):
 
     def download(self):
         pass
+
+    def load_data(self, force_reload):
+        if not os.path.exists(self.processed_paths[0]) or force_reload:
+            self.process()
+        return torch.load(self.processed_paths[0])
 
     def get_graph_list(self):
         """Returns the graph list containing networkx Graph objects."""
@@ -62,9 +67,10 @@ class GraphDataset(InMemoryDataset):
         data_list = []
         graph_list = []
 
+        print("Generating Graph dataset...")
         iteration = tqdm(root, desc="Generating Graphs", unit=" equations", total=len(root)) if self.verbose else root
         for i, formula in enumerate(iteration):
-            if self.debug and i>= 10:
+            if self.debug and i>= 50:
                 break
             
             G, py_g = self.build_graph(formula)
@@ -75,11 +81,11 @@ class GraphDataset(InMemoryDataset):
             graph_list.append(G)
         
         data, slices = self.collate(data_list)
-        # torch.save((data, slices), self.processed_paths[0])
-        self._graph_list = graph_list
+        # self._graph_list = graph_list
 
         print("Saving data...")
         torch.save((data, slices, graph_list), self.processed_paths[0])
+        self.data, self.slices, self._graph_list = data, slices, graph_list
 
     def split(self, train_ratio=0.8, val_ratio=0.1, shuffle= True):
         """
