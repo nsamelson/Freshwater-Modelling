@@ -218,6 +218,35 @@ def plot_numbers_distribution(number_occurences,name="distrib"):
     plt.savefig(f'out/{name}.jpg', format='jpeg', dpi=300) 
 
 
+def plot_training_history(history, dir_path):
+
+    metrics = set([key.split("_")[1] for key in history.keys() if "_" in key])
+
+    def plot_loss_graph(val_data,train_data, metric):
+
+        num_epochs = len(val_data)
+
+        plt.figure(figsize=(16,12))
+        plt.plot(range(1, num_epochs + 1), train_data, label=f'Train {metric}', color='blue')
+        plt.plot(range(1, num_epochs + 1), val_data, label=f'Validation {metric}', color='orange')
+        plt.xlabel('Epoch')
+        plt.ylabel(metric)
+        plt.title(f'Train and Validation {metric}')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f'{dir_path}/{metric}_history.png')
+
+    for metric in metrics:
+        
+        train_metric = "_".join(["train",metric])
+        val_metric = "_".join(["val",metric])
+
+        train_data = history[train_metric] if train_metric in history else history[metric]
+        val_data = history[val_metric] 
+        plot_loss_graph(val_data, train_data, metric)
+
+
+
 def plot_loss_graph(val_losses,train_losses, dir_path):
 
     num_epochs = len(train_losses)
@@ -232,7 +261,7 @@ def plot_loss_graph(val_losses,train_losses, dir_path):
     plt.savefig(f'{dir_path}/loss_graph.png')
 
 def plot_training_graphs(history,dir_path):
-    train_losses, val_losses, aucs, aps = history["loss"], history["val_loss"], history["auc"], history["ap"]
+    train_losses, val_losses, aucs, aps = history["loss"], history["val_loss"], history["val_auc"], history["val_ap"]
 
     epochs = range(1, len(train_losses) + 1)
 
