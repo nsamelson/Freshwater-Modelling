@@ -298,7 +298,7 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
         ).to(device)
         edge_weight = batch.edge_attr.to(device) if train_edge_features else None
 
-        x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)         
+        x = model.embed_x(batch.x,batch.tag,batch.pos,batch.nums).to(device)         
         z = model.encode(x, batch.edge_index, edge_weight)
 
         # Loss calculation
@@ -362,7 +362,7 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
             ).to(device)
             edge_weight = batch.edge_attr.to(device) if train_edge_features else None
             
-            x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)          
+            x = model.embed_x(batch.x,batch.tag,batch.pos,batch.nums).to(device)          
             z = model.encode(x, batch.edge_index,edge_weight)
 
             # Loss

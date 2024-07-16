@@ -301,7 +301,11 @@ class GraphVAE(VGAE):
             for vocab, embed_dim in self.embedding_method["embed"].items():
                 x_embed = x_recon[:,vector_index: vector_index + embed_dim]
 
-                similarity = F.cosine_similarity(x_embed.unsqueeze(1),self.embeddings[vocab].weight.unsqueeze(0), dim=2)
+                x_embed_normalized = F.normalize(x_embed, p=2, dim=1)
+                embedding_weight_normalized = F.normalize(self.embeddings[vocab].weight, p=2, dim=1)
+
+                similarity = torch.mm(x_embed_normalized, embedding_weight_normalized.t())
+                # similarity = F.cosine_similarity(x_embed.unsqueeze(1),self.embeddings[vocab].weight.unsqueeze(0), dim=2)
                 index = similarity.argmax(dim=1)
                 
                 if vocab == "tag":

@@ -36,8 +36,8 @@ class GraphDataset(InMemoryDataset):
 
         super(GraphDataset, self).__init__(root, transform, pre_transform,pre_filter,log,force_reload)
         # self.data, self.slices = torch.load(self.processed_paths[0])
-        self.data, self.slices, self._graph_list = self.load_data(force_reload)
-        # self.data, self.slices, self._graph_list = torch.load(force_reload)
+        # self.data, self.slices, self._graph_list = self.load_data(force_reload)
+        self.data, self.slices, self._graph_list = torch.load(self.processed_paths[0])
     
     @property
     def raw_file_names(self):
@@ -205,7 +205,7 @@ class GraphDataset(InMemoryDataset):
             x=torch.tensor(x,dtype=torch.long),
             edge_index= edge_index,
             edge_attr= edge_features,
-            tag_index = torch.tensor(tags,dtype=torch.long),
+            tag = torch.tensor(tags,dtype=torch.long),
             pos=torch.tensor(positions,dtype=torch.long),
             nums = torch.tensor(nums,dtype=torch.float32),
         )
