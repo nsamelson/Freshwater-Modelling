@@ -267,11 +267,12 @@ class GraphVAE(VGAE):
         Reverses the embedding process to find the index
         """
         onehot_index, embed_index, linear_index = 0, 0, 0
+        device = x_recon.device
         vector_index = 0
         data = {
-            "x": torch.zeros(x_recon.size(0), dtype=torch.long),
+            "x": torch.zeros(x_recon.size(0), dtype=torch.long, device=device),
             "pos": None,
-            "nums": torch.zeros(x_recon.size(0), dtype=torch.float32),
+            "nums": torch.zeros(x_recon.size(0), dtype=torch.float32, device=device),
             "tag": None,
         }
         raw_data = {}
