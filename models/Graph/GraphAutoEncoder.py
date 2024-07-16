@@ -114,7 +114,7 @@ class GraphDecoder(torch.nn.Module):
 
 
 class GraphVAE(VGAE):
-    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_method:dict, scale_grad_by_freq: bool, sparse_edges:bool):
+    def __init__(self, encoder: GraphEncoder, decoder: GraphDecoder, num_embeddings:int | dict, embedding_method:dict, scale_grad_by_freq: bool, sparse_edges:bool, edge_features:bool):
         """
         Initializes the GraphVAE model.
 
@@ -136,6 +136,7 @@ class GraphVAE(VGAE):
         # self.embedding_dim = embedding_dim
         self.scale_grad = scale_grad_by_freq
         self.sparse_edges = sparse_edges
+        self.edge_features = edge_features
         self.unknown_id = 1
         # self.device = device
 
@@ -292,7 +293,8 @@ class GraphVAE(VGAE):
                 # update index position in the vector
                 vector_index += embed_dim
 
-            raw_data["onehot"] = torch.softmax(x_recon[:,onehot_index:vector_index], dim=1)
+            # raw_data["onehot"] = torch.softmax(x_recon[:,onehot_index:vector_index], dim=1)
+            raw_data["onehot"] = x_recon[:,onehot_index:vector_index]
 
         if "embed" in self.embedding_method and len(self.embedding_method["embed"]) != 0:
             embed_index =  vector_index
@@ -352,7 +354,10 @@ class GraphVAE(VGAE):
         
 
         # Edges features
-        e_recon = self.decoder.edge_decoder(z,edge_index_recon)
+        if self.edge_features:
+            e_recon = self.decoder.edge_decoder(z,edge_index_recon)
+        else:
+            e_recon = None
 
         # Nodes features
         x_recon = self.decoder.node_decoder(z, edge_index_recon, e_recon)
@@ -369,7 +374,8 @@ class GraphVAE(VGAE):
         # adj_loss = pos_loss + neg_loss
 
         # Node features loss
-        x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
+        # x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
+        x_recon, _, e_recon = self.decode_all(z, pos_edge_index)
 
         # If it's onehot or embedding, chose
         if self.embedding_method["loss"] == "cross_entropy":
@@ -385,21 +391,21 @@ class GraphVAE(VGAE):
 
         # Edge features loss
         edge_loss = 0
-        if edge_weight is not None:
-            decoded_ef = self.decoder.edge_decoder(z, pos_edge_index)
+        if edge_weight is not None and gamma != 0 and self.edge_features:
+            # e_recon = self.decoder.edge_decoder(z, pos_edge_index)
             
             if self.decoder.edge_dim == 1:
-                edge_loss = F.binary_cross_entropy_with_logits(decoded_ef,edge_weight.float())
+                edge_loss = F.binary_cross_entropy_with_logits(e_recon,edge_weight.float())
             else:
-                edge_loss = F.cross_entropy(decoded_ef,edge_weight.float())
+                edge_loss = F.cross_entropy(e_recon,edge_weight.float())
 
         return alpha * adj_loss + beta * node_loss + gamma * edge_loss
 
     def test_nodes(self,z, pos_edge_index, x, x_indices, edge_weight=None):
 
-        x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
+        # x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
 
-        # x_recon, _, _ = self.decode_all(z, pos_edge_index)
+        x_recon, _, _ = self.decode_all(z, pos_edge_index)
         recon_data, raw_data = self.reverse_embed_x(x_recon)
 
         similarity = 0
@@ -414,7 +420,7 @@ class GraphVAE(VGAE):
             if key =="onehot" and x_value is not None:
                 intersection = (x_value * x_cropped).sum(dim=1).float()
                 union = ((x_value + x_cropped) > 0).sum(dim=1).float()
-                similarity += (intersection / union).mean().item()
+                similarity += (intersection / (union + EPS)).mean().item()
             
             # cosine similarity for embedding
             elif key =="embed" and x_value is not None:
@@ -422,12 +428,12 @@ class GraphVAE(VGAE):
 
             elif key == "linear" and x_value is not None:
                 euclidean_dist = torch.norm(x_value - x_cropped,p=2, dim=1)
-                similarity += 1 / (1 + euclidean_dist).mean().item()
+                similarity += (1 / (1 + euclidean_dist)).mean().item()
 
             vector_index +=  x_value.size(1)
         
         similarity /= num_embeddings
-
+        similarity = max(0, min(1,similarity))
 
         # Accuracy
         recon_indices = recon_data["x"]

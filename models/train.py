@@ -195,6 +195,7 @@ def train_model(train_config: dict):
     max_num_nodes = config.get("max_num_nodes",40)
     # sample_edges = config.get("sample_edges","sparse")
     sparse_edges = config.get("gen_sparse_edges",True)
+    train_edge_features = config.get("train_edge_features",False)
 
     print("Loading dataset...")
 
@@ -213,9 +214,10 @@ def train_model(train_config: dict):
 
     encoder = GraphEncoder(embedding_dim,hidden_channels,out_channels,layers,layer_type,batch_norm)
     decoder = GraphDecoder(embedding_dim,hidden_channels,out_channels,layers,layer_type, edge_dim=1,batch_norm=batch_norm)
-    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq, sparse_edges)
+    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq, sparse_edges, train_edge_features)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
+    scheduler = ReduceLROnPlateau(optimizer, 'min')
     model.to(device)
 
     
@@ -241,6 +243,9 @@ def train_model(train_config: dict):
 
         train_loss, train_auc, train_ap, train_acc, train_sim = train_one_epoch(model,optimizer,train_loader,device,config)
         val_loss, val_auc, val_ap, val_acc, val_sim = validate(model,val_loader,device,config)
+
+        # reduce learning rate
+        scheduler.step(val_loss)
 
         metrics = {
             "loss": train_loss, "train_auc": train_auc, "train_ap": train_ap, "train_acc": train_acc, "train_sim": train_sim, 
@@ -272,6 +277,7 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
     alpha = config.get("alpha",1)
     beta = config.get("beta",0)
     gamma = config.get("gamma",0)
+    train_edge_features = config.get("train_edge_features",False)
     
     for i,batch in enumerate(train_loader):
         # if i % 2 == 0:
@@ -290,12 +296,13 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
             force_undirected=force_undirected,
             method=neg_sampling_method
         ).to(device)
+        edge_weight = batch.edge_attr.to(device) if train_edge_features else None
 
         x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)         
-        z = model.encode(x, batch.edge_index, batch.edge_attr)
+        z = model.encode(x, batch.edge_index, edge_weight)
 
         # Loss calculation
-        loss = model.recon_full_loss(z, x, batch.edge_index, neg_edge_index, batch.edge_attr, alpha, beta, gamma)
+        loss = model.recon_full_loss(z, x, batch.edge_index, neg_edge_index, edge_weight, alpha, beta, gamma)
         if variational:
             loss = loss + (1 / batch.num_nodes) * model.kl_loss()
 
@@ -309,7 +316,7 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
         total_ap += ap  
 
         # Accuracy and similarity
-        acc, sim = model.test_nodes(z, batch.edge_index, x, batch.x, batch.edge_attr)
+        acc, sim = model.test_nodes(z, batch.edge_index, x, batch.x, edge_weight)
         total_acc += acc
         total_sim += sim
     
@@ -337,6 +344,7 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
     alpha = config.get("alpha",1)
     beta = config.get("beta",0)
     gamma = config.get("gamma",0)
+    train_edge_features = config.get("train_edge_features",False)
 
     with torch.no_grad():
         for batch in val_loader:
@@ -352,12 +360,13 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
                 force_undirected=force_undirected,
                 method=neg_sampling_method
             ).to(device)
+            edge_weight = batch.edge_attr.to(device) if train_edge_features else None
             
             x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)          
-            z = model.encode(x, batch.edge_index, batch.edge_attr)
+            z = model.encode(x, batch.edge_index,edge_weight)
 
             # Loss
-            loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index, batch.edge_attr, alpha, beta, gamma)
+            loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index, edge_weight, alpha, beta, gamma)
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()
             total_val_loss += loss.item()
@@ -368,7 +377,7 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
             total_ap += ap  
 
             # Accuracy and similarity
-            acc, sim = model.test_nodes(z, pos_edge_index,x,batch.x, batch.edge_attr)
+            acc, sim = model.test_nodes(z, pos_edge_index,x,batch.x, edge_weight)
             total_acc += acc
             total_sim += sim
 
