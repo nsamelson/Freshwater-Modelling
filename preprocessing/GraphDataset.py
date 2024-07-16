@@ -37,6 +37,7 @@ class GraphDataset(InMemoryDataset):
         super(GraphDataset, self).__init__(root, transform, pre_transform,pre_filter,log,force_reload)
         # self.data, self.slices = torch.load(self.processed_paths[0])
         self.data, self.slices, self._graph_list = self.load_data(force_reload)
+        # self.data, self.slices, self._graph_list = torch.load(force_reload)
     
     @property
     def raw_file_names(self):
@@ -70,7 +71,7 @@ class GraphDataset(InMemoryDataset):
         print("Generating Graph dataset...")
         iteration = tqdm(root, desc="Generating Graphs", unit=" equations", total=len(root)) if self.verbose else root
         for i, formula in enumerate(iteration):
-            if self.debug and i>= 50:
+            if self.debug and i>= 500:
                 break
             
             G, py_g = self.build_graph(formula)
