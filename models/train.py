@@ -185,7 +185,7 @@ def train_model(train_config: dict):
     scale_grad_by_freq = config.get("scale_grad_by_freq",True)
     latex_set = config.get("latex_set","OleehyO")
     vocab_type = config.get("vocab_type","concat")
-    method = config.get("method",{"onehot":{"concat":256}, "embed":{}, "linear":{}})
+    method = config.get("method",None)
     batch_norm = config.get("batch_norm",False)
     shuffle = config.get("shuffle",False)
     debug = config.get("debug",False)
@@ -196,6 +196,26 @@ def train_model(train_config: dict):
     # sample_edges = config.get("sample_edges","sparse")
     sparse_edges = config.get("gen_sparse_edges",True)
     train_edge_features = config.get("train_edge_features",False)
+
+    # Build method dict
+    if method is None:
+        embed = config.get("embed_method","onehot")
+        
+        method = {
+            "onehot":{},
+            "embed":{},
+            "linear":{},
+            "loss": "cross_entropy" if embed == "onehot" else "cosine",
+            "scale": "log",
+        }
+        for component in ["tag","concat","pos"]:
+            dim = config.get(f"{component}_dim",None)
+            if dim is not None:
+                method[embed].update({component:dim})
+        
+    
+    print("The embedding method is: ",method)
+        
 
     print("Loading dataset...")
 

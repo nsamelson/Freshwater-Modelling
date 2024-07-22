@@ -18,16 +18,24 @@ from config import CONFIG
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
 from preprocessing.GraphDataset import GraphDataset
-from utils.plot import plot_training_graphs, plot_hyperparam_search
+from utils.plot import plot_training_graphs, plot_hyperparam_search, plot_training_history
 from utils.stats import extract_data_from_search
 from utils.save import json_dump
 import tempfile
 
 
-def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name="GAE_search_channel_dims"):
+
+
+def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samples=1,gpus_per_trial=float(1/4)):
 
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
+    tmp_dir = "/data/nsam947/tmp"
+
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
+    os.environ["RAY_TMPDIR"] = tmp_dir
+    
     trials_dir = os.path.join(storage_path, model_name)
     # checkpoint_dir = os.path.join(trials_dir, "checkpoints")
     print("Current Working Directory:", os.getcwd())
@@ -35,20 +43,30 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
     # Parameters to tune
     search_space = {
         "num_epochs":max_num_epochs,
-        "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
-        "num_layers": tune.choice([2,3,4,5,6,7]),
-        "hidden_channels": tune.choice([16,32,64,128,256,512]),
-        "out_channels": tune.choice([8,16,32,64,128]),
-        "embedding_dims":tune.choice([10,50,100,200,500,1000]),
+        "latex_set":latex_set,
+        "vocab_type":vocab_type,
+        "xml_name":xml_name,
+        "model_name":model_name,
+
+        "train_edge_features": tune.grid_search([True,False]),
+        "tag_dim": tune.grid_search([None,31,256]),
+        "concat_dim": tune.grid_search([256,512,1024]),
+        "pos_dim": tune.grid_search([None,256]),
+        # "loss": tune.grid_search(["mse","cross_entropy","cosine"]),
+        "embed_method": tune.grid_search(["onehot","embed"])
+        # "scale_grad_by_freq": tune.grid_search([True,False]),
+        # "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
+        # "num_layers": tune.choice([2,3,4,5,6,7]),
+        # "hidden_channels": tune.choice([16,32,64,128,256,512]),
+        # "out_channels": tune.choice([8,16,32,64,128]),
+        # "embedding_dims":tune.choice([10,50,100,200,500,1000]),
         # "batch_size": tune.choice([64, 128, 256,512,1024]),
         # "layer_type": tune.choice([GCNConv, GraphConv]),
-        # "scale_grad_by_freq":tune.choice([True,False]),
-        # "sample_edges":tune.choice(["dense","sparse"]),
-        # "variational":tune.choice([True,False])
+  
     }
 
     hyperopt_search = HyperOptSearch(metric="val_loss", mode="min")
-    grace_period = 10
+    grace_period = 15
 
     # Define ASHA scheduler
     asha_scheduler = ASHAScheduler(
@@ -74,7 +92,7 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
             trials_dir, 
             trainable=tune.with_resources(
                 tune.with_parameters(train_model),
-                resources={"cpu": 6, "gpu": gpus_per_trial}
+                resources={"cpu": 8, "gpu": gpus_per_trial}
             ), 
             resume_errored=True,
             param_space= search_space
@@ -83,10 +101,10 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
         tuner = tune.Tuner(
             trainable=tune.with_resources(
                 tune.with_parameters(train_model),
-                resources={"cpu": 6, "gpu": gpus_per_trial}
+                resources={"cpu": 8, "gpu": gpus_per_trial}
             ),
             tune_config=tune.TuneConfig(
-                search_alg=hyperopt_search,  
+                # search_alg=hyperopt_search,  
                 scheduler=asha_scheduler,  
                 num_samples=num_samples,  # Adjust based on your budget
             ),
@@ -131,19 +149,21 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
         with open(params_path,"r") as f:
             params = json.load(f)
 
-        metrics_head = results.keys()[:4]
+        metrics_head = results.keys()[:10]
         history = {key:list(results[key]) for key in metrics_head}
         # history["params"] = params
 
         full_config = CONFIG
         full_config.update(params)
+        full_config = rename_classes(full_config)
         # Dump history of the best trial
         json_dump(f'{dir_path}/history.json',history)
         json_dump(f'{dir_path}/params.json',full_config)
 
         # # Dump history of the best trial
         # json_dump(f'{dir_path}/history.json',history)
-        plot_training_graphs(history,dir_path)
+        # plot_training_graphs(history,dir_path)
+        plot_training_history(history, dir_path)
     except Exception as e:
         print(f"Couldn't save history and plot graphs because of {e}")
 
@@ -154,6 +174,11 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
     except Exception as e:
         print(f"Couldn't create boxplot of hyperparams search")
 
+def rename_classes(config:dict):
+    for key, value in config.items():
+        if 'class' in str(value):
+            config[key] = str(value).split('.')[-1].strip(">'")
+    return config
 
 
 # def train_model(config={}):
