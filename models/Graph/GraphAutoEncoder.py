@@ -168,6 +168,8 @@ class GraphVAE(VGAE):
                         input_dims = self.num_embeddings
                     elif vocab in ["mi","mn","mtext","mo"]:
                         input_dims = self.num_embeddings[vocab]
+                    elif vocab == "pos":
+                        input_dims = 256
                     else:
                         raise ValueError(f"Invalid vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
                     self.embeddings[vocab] = nn.Embedding(input_dims, embed_dim, scale_grad_by_freq=self.scale_grad, padding_idx=0) 
@@ -202,18 +204,21 @@ class GraphVAE(VGAE):
             for vocab, embed_dim in self.embedding_method["onehot"].items():
                 if vocab == "tag":
                     embedded.append(self.embeddings["tag"](tag_index))
-                elif vocab == "concat":
-                    # limit x to avoid any overflow
-                    # x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
-                    try:
-                        mask = x >= embed_dim
-                        x[mask] = self.unknown_id
-                        embedded.append(self.embeddings["concat"](x))
-                        # x = torch.where(x >= embed_dim, torch.tensor(self.unknown_id, device=device), x)
-                    except RuntimeError as e:
-                        print(f"BIG indexSelectLargeIndex ERROR HERE: {e}")
-                        raise
+                elif vocab in ["concat","combined"]:
+                    max_id = x >= embed_dim
+                    x[max_id] = self.unknown_id
+                    embedded.append(self.embeddings[vocab](x))
+                elif vocab in ["mi","mn","mtext","mo"]:
+                    max_id = x >= embed_dim
+                    x[max_id] = self.unknown_id
+
+                    mask = (tag_index == MATHML_TAGS.index(vocab))
+                    vector = torch.zeros(x.size(0),embed_dim, dtype=torch.float32, device=device) #.unsqueeze(1).repeat(1, self.embedding_dim)
+                    vector[mask] = self.embeddings[vocab](x[mask])
+                    embedded.append(vector)
                 elif vocab == "pos":
+                    max_id = x >= embed_dim
+                    pos[max_id] = self.unknown_id
                     embedded.append(self.embeddings["pos"](pos))
                 else:
                     raise ValueError(f"Invalid one-hot vocab selected. Expected one of {METHODS['onehot']}, but got {vocab}")
@@ -229,12 +234,14 @@ class GraphVAE(VGAE):
                     vector = torch.zeros(x.size(0),embed_dim, dtype=torch.float32, device=device) #.unsqueeze(1).repeat(1, self.embedding_dim)
                     vector[mask] = self.embeddings[vocab](x[mask])
                     embedded.append(vector)
+                elif vocab == "pos":
+                    embedded.append(self.embeddings["pos"](pos))
                 else:
                     raise ValueError(f"Invalid embed vocab selected. Expected one of {METHODS['embed']}, but got {vocab}")
 
         if "linear" in self.embedding_method and len(self.embedding_method["linear"]) != 0:
                 for vocab, embed_dim in self.embedding_method["linear"].items():
-                    mask = (nums != -1)
+                    mask = (nums != -1) # not a number when num= -1
                     nums[mask] = self.feature_scale(nums[mask])
                     vector = torch.zeros(x.size(0), embed_dim, dtype=torch.float32, device=device)
                     vector[mask] = self.embeddings[vocab](nums[mask].unsqueeze(1)) # 
@@ -247,9 +254,12 @@ class GraphVAE(VGAE):
     def feature_scale(self, nums):
         scaling = self.embedding_method["scale"]
 
+        # Ensure zero values remain zero and clamp other values
+        bounded = torch.where(nums == 0, nums, torch.clamp(nums, min=1e-6, max=1e6))
+
         if scaling in METHODS["scale"]:
             if scaling == "log":
-                return torch.log10(torch.clamp(nums, min=1e-6) + 1e-7)
+                return torch.log10(bounded + 1e-7)
         else:
             raise ValueError(f"Invalid feature scaling. Expected one of {METHODS['scale']}, but got {scaling}")
         
@@ -286,8 +296,12 @@ class GraphVAE(VGAE):
 
                 if vocab == "tag":
                     data["tag"] = index
-                elif vocab == "concat":
+                elif vocab in ["concat","combined"]:
                     data["x"] = index
+                elif vocab in ["mi","mn","mtext","mo"]:
+                    # create a mask to apply the found index only on the data for which the tag is equal to the vocab
+                    mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
+                    data["x"][mask] = index[mask]
                 elif vocab == "pos":
                     data["pos"] = index
                 
@@ -317,7 +331,8 @@ class GraphVAE(VGAE):
                     # create a mask to apply the found index only on the data for which the tag is equal to the vocab
                     mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
                     data["x"][mask] = index[mask]
-
+                elif vocab == "pos":
+                    data["pos"] = index
                 vector_index += embed_dim
             raw_data["embed"] = x_recon[:,embed_index:vector_index]
 
@@ -380,7 +395,7 @@ class GraphVAE(VGAE):
 
         # Node features loss
         # x_recon = self.decoder.node_decoder(z, pos_edge_index, edge_weight)
-        x_recon, _, e_recon = self.decode_all(z, pos_edge_index)
+        x_recon, _, _ = self.decode_all(z, pos_edge_index)
 
         # If it's onehot or embedding, chose
         if self.embedding_method["loss"] == "cross_entropy":
@@ -397,7 +412,7 @@ class GraphVAE(VGAE):
         # Edge features loss
         edge_loss = 0
         if edge_weight is not None and gamma != 0 and self.edge_features:
-            # e_recon = self.decoder.edge_decoder(z, pos_edge_index)
+            e_recon = self.decoder.edge_decoder(z, pos_edge_index)
             
             if self.decoder.edge_dim == 1:
                 edge_loss = F.binary_cross_entropy_with_logits(e_recon,edge_weight.float())
