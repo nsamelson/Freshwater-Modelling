@@ -14,19 +14,19 @@ CONFIG = {
     "out_channels":32,
     "hidden_channels":64,
     "scale_grad_by_freq":True,
-    "variational":False,
+    "variational":True,
     "batch_norm":False,
     "force_undirected":True,
     "alpha":1,
     "beta":1,
     "gamma":1,
-    "method":{
-        "onehot": {"concat": 256},
-        "embed": {},
-        "linear": {},
-        "scale": "log",
-        "loss":"cross_entropy"
-    },
+    # "method":{
+    #     "onehot": {},
+    #     "embed": {"concat": 256},
+    #     "linear": {},
+    #     "scale": "log",
+    #     "loss":"mse"
+    # },
     "shuffle": False,
     "max_num_nodes": 100,
     "latex_set":"OleehyO",
@@ -35,6 +35,7 @@ CONFIG = {
     "force_reload": False,
     "sample_edges":"sparse",
     "gen_sparse_edges": True,
+    "train_edge_features": False,
 }
 
 MATHML_TAGS = [

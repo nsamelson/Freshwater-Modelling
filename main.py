@@ -69,11 +69,13 @@ if __name__=="__main__":
         print("Starting preprocessing...")
         mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=force_reload)
         vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload, reload_xml_elements=force_reload)
-        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug)
+        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=True, debug=debug, max_num_nodes=100)
         print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
         print(f"The generated dataset contains {len(dataset)} graphs")
 
-        # print(dataset[0].x, dataset[0].tag_index)
+
+
+        print(dataset[0].x, dataset[0].tag)
         # print(vocab.shape())
         # graph = dataset[1]
         # print(graph.nums)
@@ -127,10 +129,10 @@ if __name__=="__main__":
     if args.train:
 
         method = {
-            "onehot": {"concat":256},
+            "onehot": {"tag":31,"concat":256},
             "embed": {},
             "linear": {},
-            "loss": "cross_entropy",
+            "loss": "mse",
             "scale": "log",
         }
         if debug:
@@ -141,14 +143,16 @@ if __name__=="__main__":
                 "latex_set":"OleehyO",
                 "vocab_type":"concat",
                 "method": method,
-                "debug": debug
+                "debug": debug,
+                "force_reload":False,
+                "train_edge_features":True
             }
             train.train_model(config)
         else:
             train.main(model_name, latex_set, vocab_type, xml_name, method, epochs, force_reload)
     
     if args.search:
-        search.main()
+        search.main(model_name, latex_set, vocab_type, xml_name,epochs)
 
     if args.test:
         test.main()
