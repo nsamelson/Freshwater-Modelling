@@ -162,8 +162,12 @@ if __name__=="__main__":
         # stats.count_text_occurences_per_tag()
         # stats.extract_data_from_search()
         # plot.plot_hyperparam_search("trained_models/GAE_search_channel_dims")
-        metrics = {
-            "loss": [], "train_auc": [], "train_ap": [], "train_acc": [], "train_sim": [], 
-            "val_loss": [], "val_auc": [], "val_ap": [], "val_acc": [], "val_sim": []
-        }
-        plot.plot_training_history(metrics,"something")
+        # metrics = {
+        #     "loss": [], "train_auc": [], "train_ap": [], "train_acc": [], "train_sim": [], 
+        #     "val_loss": [], "val_auc": [], "val_ap": [], "val_acc": [], "val_sim": []
+        # }
+        # plot.plot_training_history(metrics,"something")
+
+        path = "/data/nsam947/Freshwater-Modelling/data/ray_results/concat_search_var"
+        # stats.extract_data_from_search(path)
+        plot.plot_history_from_search("concat_search_var")

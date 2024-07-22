@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from matplotlib import pyplot as plt
+from matplotlib import cm, pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -226,7 +226,7 @@ def plot_training_history(history, dir_path):
 
         num_epochs = len(val_data)
 
-        plt.figure(figsize=(16,12))
+        plt.figure(figsize=(12,8))
         plt.plot(range(1, num_epochs + 1), train_data, label=f'Train {metric}', color='blue')
         plt.plot(range(1, num_epochs + 1), val_data, label=f'Validation {metric}', color='orange')
         plt.xlabel('Epoch')
@@ -234,6 +234,7 @@ def plot_training_history(history, dir_path):
         plt.title(f'Train and Validation {metric}')
         plt.legend()
         plt.tight_layout()
+        plt.grid(True)
         plt.savefig(f'{dir_path}/{metric}_history.png')
 
     for metric in metrics:
@@ -448,3 +449,113 @@ def plot_hyperparam_search(dir_path,metrics=["auc", "ap", "val_loss"],scatter_pa
     # Save the figure
     plt.savefig(os.path.join(dir_path,'hyperparameter_boxplots.png'))
         
+def plot_history_from_search(model_name ="concat_search_var"):
+    with open(os.path.join("trained_models",model_name,"all_histories.json"),"r") as f:
+        histories = json.load(f)
+    
+    history_per_metric = {}
+    params_per_training = {}
+    metrics_to_watch = ["val_loss","val_acc","val_sim"]
+    col_type = "tag_dim"
+    row_type = "embed_method"
+    cat_type = "train_edge_features"
+
+    categories = set()
+
+    max_y = 0
+    min_y = math.inf
+
+    y_lim = {}
+
+    for i,training in enumerate(histories):
+        params_per_training[i] = training["params"]
+        col = training["params"][col_type]
+        row = training["params"][row_type]
+        cat = training["params"][cat_type]
+
+        
+        
+
+        categories.add(cat)
+
+        for metric, data in training.items():
+            if metric not in ["params","trial_name"]:
+                # if row not in y_lim:
+                #     y_lim[row] = {metric:{"max" : 0,"min" : math.inf}}
+                # elif metric not in y_lim:
+                #     y_lim[row][metric] = {"max" : 0,"min" : math.inf}
+                
+                # y_lim[row][metric]["min"] = min(y_lim[row][metric]["min"],min(data))
+                # y_lim[row][metric]["max"] = max(y_lim[row][metric]["max"],max(data))
+
+
+                if metric not in  history_per_metric:
+                    history_per_metric[metric] = {col:{row: {cat:[data]}}}
+                elif col not in history_per_metric[metric]:
+                    history_per_metric[metric][col] = {row: {cat:[data]}}
+                elif row not in history_per_metric[metric][col]:
+                    history_per_metric[metric][col][row] = {cat:[data]}
+                elif cat not in history_per_metric[metric][col][row]:
+                    history_per_metric[metric][col][row][cat] = [data]
+                else:
+                    history_per_metric[metric][col][row][cat].append(data)
+    print(y_lim)
+    def plot_metric_graph(metric, data):
+
+        # num_epochs = max([len(training) for training in data])
+        num_cols = len(data.keys())
+        num_rows = len(list(data.values())[0])
+        max_epochs = 15
+        # max_y = max([])
+
+        # plt.figure(figsize=(12,8))
+        # Create a figure with 6 subplots
+        fig, axs = plt.subplots(num_rows, num_cols , figsize=(num_cols*4, num_rows*4),sharex=True,sharey=True)
+
+        # Create a color map with as many colors as there are categories
+        # num_categories = len(categories) + 2
+        # colors = plt.get_cmap("viridis", num_categories)
+        colors = ['tab:blue','tab:orange','g','tab:red','tab:purple','tab:olive','tab:cyan','tab:pink']
+
+        category_colors = {cat: colors[i] for i, cat in enumerate(categories)}
+
+
+        i,j =0,0
+        for col_cat, sub_data in data.items():
+            for row_cat, subsub_data in sub_data.items():
+                ax = axs[i,j]
+                plotted_labels = set()
+                # ax = axs[x,y]
+                # print(row_cat, subsub_data)
+                for cat, subsubsub_data in subsub_data.items():
+                    color = category_colors[cat]
+                    x = range(1, max_epochs + 1)
+                    for y in subsubsub_data:
+                        ax.plot(x, y[:max_epochs], label=f"{cat_type}: {cat}" if cat not in plotted_labels else "",color=color)
+                        plotted_labels.add(cat)
+
+                if i == 0:
+                    ax.set_title(f"{col_type}: {col_cat}")
+                if j== 0:
+                    ax.set_ylabel(f"{row_type}: {row_cat}")
+                # ax.set_ylim(y_lim[row_cat][metric]["min"], y_lim[row_cat][metric]["max"])
+                ax.set_xlabel('Epoch')
+                ax.grid(True)
+                i+=1
+            j+= 1
+            i=0
+
+
+
+        handles, labels = ax.get_legend_handles_labels()
+        unique_labels = dict(zip(labels, handles))
+        plt.legend(unique_labels.values(), unique_labels.keys())
+        plt.suptitle(f'History {metric} per {col_type} and {row_type}',fontsize=20)
+        plt.tight_layout()
+        plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.png')
+        # plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.svg')
+
+    for _metric in metrics_to_watch:
+        plot_metric_graph(_metric,history_per_metric[_metric])
+    # print(history_per_metric["trial_name"])
+    # print(params_per_training[0])

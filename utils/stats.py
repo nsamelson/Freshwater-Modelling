@@ -238,7 +238,7 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
                 
                 # Load csv
                 results = pd.read_csv(progress_dir)
-                metrics_head = results.keys()[:4]
+                metrics_head = results.keys()[:10]
 
                 # generate history dict
                 history = {key:list(results[key]) for key in metrics_head}
@@ -264,6 +264,7 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
 
     try:
         save.json_dump(f"trained_models/{name}/all_histories.json",trial_histories)
+        print(f"Saved the all histories under trained_models/{name}/all_histories.json")
     except Exception as e:
         print(f"couldn't save the histories because of {e}")
 
