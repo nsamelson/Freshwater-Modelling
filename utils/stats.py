@@ -269,6 +269,55 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
         print(f"couldn't save the histories because of {e}")
 
 
+def create_combined_dataframe(base_path, output_path):
+    data_list = []
+
+    output_file = os.path.join(output_path,"all_progress.csv")
+    
+    # Iterate through each training folder
+    for folder_name in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder_name)
+        
+        if os.path.isdir(folder_path):
+            # Load CSV file
+            csv_file = os.path.join(folder_path, 'progress.csv')
+            if os.path.isfile(csv_file):
+                df = pd.read_csv(csv_file)
+                columns_to_keep = list(df.columns[:10]) + [df.columns[14]]
+                df = df[columns_to_keep]
+            else:
+                print(f"CSV file not found in {folder_path}")
+                continue
+            
+            # Load JSON file
+            json_file = os.path.join(folder_path, 'params.json')
+            if os.path.isfile(json_file):
+                with open(json_file, 'r') as f:
+                    params = json.load(f)
+            else:
+                print(f"JSON file not found in {folder_path}")
+                continue
+            
+            # Extract parameters
+            params_df = pd.DataFrame([params] * len(df))
+            
+            # Combine metrics with parameters
+            combined_df = pd.concat([df, params_df], axis=1)
+            
+            # Add folder name for reference
+            combined_df['folder'] = folder_name
+            
+            # Append to the list
+            data_list.append(combined_df)
+    
+    # Concatenate all dataframes
+    full_df = pd.concat(data_list, ignore_index=True)
+    
+    # Save to CSV
+    full_df.to_csv(output_file, index=False)
+    print(f"Combined DataFrame saved to {output_file}")
+
+
 
 def decode_xml_entities(text):
     return html.unescape(text)

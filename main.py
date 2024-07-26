@@ -69,7 +69,7 @@ if __name__=="__main__":
         print("Starting preprocessing...")
         mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=force_reload)
         vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload, reload_xml_elements=force_reload)
-        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=True, debug=debug, max_num_nodes=100)
+        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug, max_num_nodes=100)
         print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
         print(f"The generated dataset contains {len(dataset)} graphs")
 
@@ -168,6 +168,10 @@ if __name__=="__main__":
         # }
         # plot.plot_training_history(metrics,"something")
 
-        path = "/data/nsam947/Freshwater-Modelling/data/ray_results/concat_search_var"
+        in_path = "/data/nsam947/Freshwater-Modelling/data/ray_results/concat_search_var"
+        out_path = "/data/nsam947/Freshwater-Modelling/trained_models/concat_search_var"
         # stats.extract_data_from_search(path)
-        plot.plot_history_from_search("concat_search_var")
+        # plot.plot_history_from_search("concat_search_var")
+        plot.plot_study("ablation_study")
+
+        # stats.create_combined_dataframe(in_path,out_path)

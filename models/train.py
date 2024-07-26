@@ -200,6 +200,10 @@ def train_model(train_config: dict):
     # Build method dict
     if method is None:
         embed = config.get("embed_method","onehot")
+
+        if embed == "freq_embed":
+            embed = "embed"
+            scale_grad_by_freq = True
         
         method = {
             "onehot":{},
@@ -208,7 +212,7 @@ def train_model(train_config: dict):
             "loss": "cross_entropy" if embed == "onehot" else "cosine",
             "scale": "log",
         }
-        for component in ["tag","concat","pos"]:
+        for component in ["tag","concat","pos","combined","mi","mo","mtext","mn"]:
             dim = config.get(f"{component}_dim",None)
             if dim is not None:
                 method[embed].update({component:dim})

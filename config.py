@@ -13,7 +13,7 @@ CONFIG = {
     "num_layers":4,
     "out_channels":32,
     "hidden_channels":64,
-    "scale_grad_by_freq":True,
+    "scale_grad_by_freq":False,
     "variational":True,
     "batch_norm":False,
     "force_undirected":True,

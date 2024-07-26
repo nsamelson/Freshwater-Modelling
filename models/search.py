@@ -18,6 +18,7 @@ from config import CONFIG
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
 from preprocessing.GraphDataset import GraphDataset
+from utils import stats
 from utils.plot import plot_training_graphs, plot_hyperparam_search, plot_training_history
 from utils.stats import extract_data_from_search
 from utils.save import json_dump
@@ -48,12 +49,17 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
         "xml_name":xml_name,
         "model_name":model_name,
 
+        # "concat_dim":256,
+        "combined_dim":256,
+        # "embed_method": "onehot",
+        "tag_dim": 256,
+
         "train_edge_features": tune.grid_search([True,False]),
-        "tag_dim": tune.grid_search([None,31,256]),
-        "concat_dim": tune.grid_search([256,512,1024]),
+        # "tag_dim": tune.grid_search([None,256]),
         "pos_dim": tune.grid_search([None,256]),
+        # "concat_dim": tune.grid_search([256,512,1024]),
         # "loss": tune.grid_search(["mse","cross_entropy","cosine"]),
-        "embed_method": tune.grid_search(["onehot","embed"])
+        "embed_method": tune.grid_search(["onehot","embed","freq_embed"])
         # "scale_grad_by_freq": tune.grid_search([True,False]),
         # "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
         # "num_layers": tune.choice([2,3,4,5,6,7]),
@@ -105,7 +111,7 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
             ),
             tune_config=tune.TuneConfig(
                 # search_alg=hyperopt_search,  
-                scheduler=asha_scheduler,  
+                # scheduler=asha_scheduler,  
                 num_samples=num_samples,  # Adjust based on your budget
             ),
             param_space=search_space,
@@ -113,13 +119,13 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
                 name=model_name,
                 storage_path=storage_path,
                 failure_config=config.FailureConfig(max_failures=-1),
-                stop=stopper
+                # stop=stopper
             )
         )
 
     results = tuner.fit()
-    best_result = results.get_best_result("val_loss", "min","all")
-    best_model = best_result.get_best_checkpoint("val_loss","min")
+    best_result = results.get_best_result("val_acc", "max","all")
+    best_model = best_result.get_best_checkpoint("val_acc","max")
 
     # Print the best results
     print("Best trial config: {}".format(best_result.config))
@@ -170,6 +176,7 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
     # Plot the hyperparam search
     try:
         extract_data_from_search(trials_dir)
+        stats.create_combined_dataframe(trials_dir,f"trained_models/{model_name}")
         plot_hyperparam_search(dir_path)
     except Exception as e:
         print(f"Couldn't create boxplot of hyperparams search")
