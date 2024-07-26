@@ -449,113 +449,202 @@ def plot_hyperparam_search(dir_path,metrics=["auc", "ap", "val_loss"],scatter_pa
     # Save the figure
     plt.savefig(os.path.join(dir_path,'hyperparameter_boxplots.png'))
         
-def plot_history_from_search(model_name ="concat_search_var"):
-    with open(os.path.join("trained_models",model_name,"all_histories.json"),"r") as f:
+def plot_history_from_search(model_name="concat_search_var"):
+    with open(os.path.join("trained_models", model_name, "all_histories.json"), "r") as f:
         histories = json.load(f)
-    
+
     history_per_metric = {}
     params_per_training = {}
-    metrics_to_watch = ["val_loss","val_acc","val_sim"]
-    col_type = "tag_dim"
+    metrics_to_watch = ["val_loss", "val_acc", "val_sim"]
+    col_type = "train_edge_features"
     row_type = "embed_method"
-    cat_type = "train_edge_features"
+    cat_type = "concat_dim"
 
+    max_epochs = 15
     categories = set()
-
-    max_y = 0
-    min_y = math.inf
-
     y_lim = {}
 
-    for i,training in enumerate(histories):
-        params_per_training[i] = training["params"]
-        col = training["params"][col_type]
-        row = training["params"][row_type]
-        cat = training["params"][cat_type]
+        # Initialize structures to store data
+    categories = set()
+    history_data = {metric: [] for metric in metrics_to_watch}
+    y_lim = {metric: {} for metric in metrics_to_watch}
 
-        
-        
-
+    # Process the histories
+    for training in histories:
+        params = training["params"]
+        col = params[col_type]
+        row = params[row_type]
+        cat = params[cat_type]
         categories.add(cat)
 
         for metric, data in training.items():
-            if metric not in ["params","trial_name"]:
-                # if row not in y_lim:
-                #     y_lim[row] = {metric:{"max" : 0,"min" : math.inf}}
-                # elif metric not in y_lim:
-                #     y_lim[row][metric] = {"max" : 0,"min" : math.inf}
-                
-                # y_lim[row][metric]["min"] = min(y_lim[row][metric]["min"],min(data))
-                # y_lim[row][metric]["max"] = max(y_lim[row][metric]["max"],max(data))
-
-
-                if metric not in  history_per_metric:
-                    history_per_metric[metric] = {col:{row: {cat:[data]}}}
-                elif col not in history_per_metric[metric]:
-                    history_per_metric[metric][col] = {row: {cat:[data]}}
-                elif row not in history_per_metric[metric][col]:
-                    history_per_metric[metric][col][row] = {cat:[data]}
-                elif cat not in history_per_metric[metric][col][row]:
-                    history_per_metric[metric][col][row][cat] = [data]
+            if metric in metrics_to_watch:
+                data = np.array(data[:max_epochs])
+                history_data[metric].append((col, row, cat, data))
+                if (row, cat) not in y_lim[metric]:
+                    y_lim[metric][(row, cat)] = {"data": [data]}
                 else:
-                    history_per_metric[metric][col][row][cat].append(data)
-    print(y_lim)
-    def plot_metric_graph(metric, data):
+                    y_lim[metric][(row, cat)]["data"].append(data)
+                    
+    # Calculate Q1 and Q3 for each row and category
+    for metric in y_lim:
+        for key in y_lim[metric]:
+            data = np.array(y_lim[metric][key]["data"])
+            q1 = np.percentile(data, 25, axis=0)
+            q3 = np.percentile(data, 75, axis=0)
+            y_lim[metric][key] = {"q1": q1, "q3": q3}
 
-        # num_epochs = max([len(training) for training in data])
-        num_cols = len(data.keys())
-        num_rows = len(list(data.values())[0])
-        max_epochs = 15
-        # max_y = max([])
+    def plot_metric_graph(metric):
+        data = history_data[metric]
+        cols = list(set([item[0] for item in data]))
+        rows = list(set([item[1] for item in data]))
+        num_cols = len(cols)
+        num_rows = len(rows)
+        colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:olive', 'tab:cyan', 'tab:pink']
+        category_colors = {cat: colors[i % len(colors)] for i, cat in enumerate(categories)}
 
-        # plt.figure(figsize=(12,8))
-        # Create a figure with 6 subplots
-        fig, axs = plt.subplots(num_rows, num_cols , figsize=(num_cols*4, num_rows*4),sharex=True,sharey=True)
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(num_cols * 4, num_rows * 4), sharex=True)
 
-        # Create a color map with as many colors as there are categories
-        # num_categories = len(categories) + 2
-        # colors = plt.get_cmap("viridis", num_categories)
-        colors = ['tab:blue','tab:orange','g','tab:red','tab:purple','tab:olive','tab:cyan','tab:pink']
+        row_limits = {row: {"min": float('inf'), "max": float('-inf')} for row in rows}
 
-        category_colors = {cat: colors[i] for i, cat in enumerate(categories)}
+        # First pass to find y-limits per row
+        for (col, row, cat, y) in data:
+            row_limits[row]["min"] = min(row_limits[row]["min"], y.min())
+            row_limits[row]["max"] = max(row_limits[row]["max"], y.max())
 
+        for (col, row, cat, y) in data:
+            i = rows.index(row)
+            j = cols.index(col)
+            ax = axs[i, j] if num_rows > 1 and num_cols > 1 else (axs[i] if num_rows > 1 else (axs[j] if num_cols > 1 else axs))
 
-        i,j =0,0
-        for col_cat, sub_data in data.items():
-            for row_cat, subsub_data in sub_data.items():
-                ax = axs[i,j]
-                plotted_labels = set()
-                # ax = axs[x,y]
-                # print(row_cat, subsub_data)
-                for cat, subsubsub_data in subsub_data.items():
-                    color = category_colors[cat]
-                    x = range(1, max_epochs + 1)
-                    for y in subsubsub_data:
-                        ax.plot(x, y[:max_epochs], label=f"{cat_type}: {cat}" if cat not in plotted_labels else "",color=color)
-                        plotted_labels.add(cat)
+            color = category_colors[cat]
+            x = range(1, max_epochs + 1)
+            ax.plot(x, y, label=f"{cat_type}: {cat}", color=color)
+            q1 = y_lim[metric][(row, cat)]["q1"]
+            q3 = y_lim[metric][(row, cat)]["q3"]
+            ax.fill_between(x, q1, q3, alpha=0.05, color=color)
 
-                if i == 0:
-                    ax.set_title(f"{col_type}: {col_cat}")
-                if j== 0:
-                    ax.set_ylabel(f"{row_type}: {row_cat}")
-                # ax.set_ylim(y_lim[row_cat][metric]["min"], y_lim[row_cat][metric]["max"])
-                ax.set_xlabel('Epoch')
-                ax.grid(True)
-                i+=1
-            j+= 1
-            i=0
+            ax.set_ylim(row_limits[row]["min"], row_limits[row]["max"])
 
-
+            if i == 0:
+                ax.set_title(f"{col_type}: {col}")
+            if j == 0:
+                ax.set_ylabel(f"{row_type}: {row}")
+            ax.set_xlabel('Epoch')
+            ax.grid(True)
 
         handles, labels = ax.get_legend_handles_labels()
         unique_labels = dict(zip(labels, handles))
-        plt.legend(unique_labels.values(), unique_labels.keys())
-        plt.suptitle(f'History {metric} per {col_type} and {row_type}',fontsize=20)
-        plt.tight_layout()
+        ax.legend(unique_labels.values(), unique_labels.keys())
+        plt.suptitle(f'History {metric} per {col_type} and {row_type}', fontsize=14)
+        plt.tight_layout()  # Adjust layout to fit suptitle
         plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.png')
-        # plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.svg')
 
-    for _metric in metrics_to_watch:
-        plot_metric_graph(_metric,history_per_metric[_metric])
+    for metric in metrics_to_watch:
+        plot_metric_graph(metric)
     # print(history_per_metric["trial_name"])
     # print(params_per_training[0])
+
+def plot_heatmap(model_name):
+
+    data_path = os.path.join("trained_models",model_name,"all_progress.csv")
+    df = pd.read_csv(data_path)
+
+    colormap = "inferno"
+    
+
+    print("DataFrame head:")
+    print(df.head())
+    print("\nDataFrame columns:")
+    print(df.columns)
+    
+
+    # Heatmap of Validation Loss by Embed Method and Edge Features
+    heatmap_data = df.pivot_table(index='embed_method', columns='train_edge_features', values='val_acc', aggfunc='mean')
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(heatmap_data, annot=True, cmap=colormap)
+    plt.title('Validation Accuracy by Embed Method and Edge Features')
+    plt.savefig(f'trained_models/{model_name}/heatmap.png')
+    plt.close()
+
+    # Boxplot of Validation Loss by Tag Dimension
+    plt.figure(figsize=(10, 8))
+    sns.boxplot(x='concat_dim', y='val_loss', data=df)
+    plt.title('Validation Loss by Tag Dimension')
+    plt.savefig(f'trained_models/{model_name}/boxplot.png')
+    plt.close()
+
+    # 3D Scatter Plot of Concatenation Dimension, Positional Dimension, and Accuracy
+    if "val_acc" in df.columns and "concat_dim" in df.columns and "pos_dim" in df.columns:
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        sc = ax.scatter(df['val_acc'], df['val_loss'], df['val_sim'], c=df['train_edge_features'], cmap=colormap)
+        plt.colorbar(sc)
+        ax.set_xlabel('Concat Dim')
+        ax.set_ylabel('Pos Dim')
+        ax.set_zlabel('Accuracy')
+        plt.title('3D Scatter Plot of Concat Dim, Pos Dim, and Accuracy')
+        plt.savefig(f'trained_models/{model_name}/scatter.png')
+        plt.close()
+    else:
+        print("Columns for 3D scatter plot are missing in the DataFrame.")
+
+
+def plot_study(model_name):
+    data_path = os.path.join("trained_models",model_name,"all_progress.csv")
+    df = pd.read_csv(data_path)
+
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:olive', 'tab:cyan', 'tab:pink']
+    
+    # relevant_columns = ['val_loss', "loss", 'training_iteration', 'pos_dim', 'train_edge_features', 'folder']
+    # df = df[relevant_columns]
+    df['pos_dim'] = df['pos_dim'].fillna('NaN')
+
+    groups = df.groupby(['pos_dim', 'train_edge_features'])
+
+    metrics = [('val_loss','loss'),("val_acc","train_acc"),("val_sim","train_sim")]
+    metric_names = ["loss","accuracy","similarity"]
+    fig, axs = plt.subplots(1, len(metrics), figsize=(4 * len(metrics),4))
+
+    group_labels = []
+    for i, metric in enumerate(metrics):
+        for j,((pos_dim, train_edge_features), group) in enumerate(groups):
+            # group_label = f'pos: {pos_dim}, ef: {train_edge_features}'
+            group_label = "concat"
+            group_label += "" if pos_dim =="NaN" else " + pos"
+            group_label += " + ef" if train_edge_features else ""
+
+            if group_label not in group_labels:
+                group_labels.append(group_label)
+
+            
+            axs[i].plot(group['training_iteration'], group[metric[0]], label=group_label, color = colors[j])
+            axs[i].plot(group['training_iteration'], group[metric[1]], color = colors[j], linestyle='dashed')
+        
+        if "loss" not in metric:
+            axs[i].set_ylim(0, 1.05)
+        axs[i].set_xlabel('Epoch')
+        axs[i].set_ylabel(metric_names[i])
+        axs[i].set_title(f'Train and val {metric_names[i]}')
+        axs[i].grid(True)
+
+    
+    handles, labels = [], []
+    for j, (label) in enumerate(group_labels):
+        handle = plt.Line2D([0], [1], color=colors[j], label=label)
+        handles.append(handle)
+        labels.append(label)
+    axs[0].legend(handles=handles, labels=labels, loc='upper right')
+
+    train_handle = plt.Line2D([0], [0], color='black', linestyle='dashed', label='Training')
+    val_handle = plt.Line2D([0], [0], color='black', linestyle='solid', label='Validation')
+    handles = [train_handle,val_handle]
+    labels = ['Training', 'Validation']
+    axs[-1].legend(handles=handles, labels=labels, loc='lower right')
+
+
+    plt.tight_layout(rect=[0,0, 1, 1])
+    # plt.suptitle("Ablation Study",fontsize=16)
+
+    plt.savefig(f'trained_models/{model_name}/loss_acc_sim.png')
+    # plt.savefig(f'trained_models/{model_name}/loss_acc_sim.pdf')
