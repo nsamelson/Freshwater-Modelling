@@ -24,6 +24,7 @@ if __name__=="__main__":
     parser.add_argument("-tr", "--train", action="store_true", help="Default False. Train things")
     parser.add_argument("-se", "--search", action="store_true", help="Default False. Search hyperparams")
     parser.add_argument("-st", "--stats", action="store_true", help="Default False. Create stats")
+    parser.add_argument("-pl", "--plot", action="store_true", help="Default False. Create plots")
     # Naming things
     parser.add_argument("-ln", "--latex_name", choices=["OleehyO","sample","Pfahler"], help="Name of the latex Set",default="OleehyO")
     parser.add_argument("-vn", "--vocab_name", choices=["concat","combined","split"], help="Name of the vocab method", default="concat")
@@ -67,72 +68,32 @@ if __name__=="__main__":
 
     if args.preprocess:      
         print("Starting preprocessing...")
-        mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=force_reload)
-        vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload, reload_xml_elements=force_reload)
-        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=force_reload, debug=debug, max_num_nodes=100)
+        mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=True)
+        vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=False, reload_xml_elements=False)
+        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=True, debug=debug, max_num_nodes=100)
         print(f"Pre-processed the Dataset '{latex_set}', generated a vocab with the method '{vocab_type}', and is saved into '{mathml.xml_dir}'")
         print(f"The generated dataset contains {len(dataset)} graphs")
 
 
 
-        print(dataset[0].x, dataset[0].tag)
-        # print(vocab.shape())
-        # graph = dataset[1]
-        # print(graph.nums)
+        print(dataset[-1].x, dataset[-1].tag)
 
-        # embedding_dim = 0
-        # method = {
-        #     "onehot": {},
-        #     "embed": {"concat":256,}, # "mi","mo","mtext","mn"
-        #     "linear": {},
-        #     "scale": "log",
-        #     "loss": "mse"
-        # }
-        # embedding_dim = sum(method["onehot"].values()) + sum(method["embed"].values()) + sum(method["linear"].values())
 
-        # encoder = GraphEncoder(embedding_dim,64,16,2,GCNConv)
-        # decoder = GraphDecoder(embedding_dim,64,16,2,GCNConv,edge_dim=1 )
-        # model = GraphVAE(encoder, decoder, vocab.shape(), embedding_dim,method ,True)
-        
-        # x = model.embed_x(graph.x,graph.tag_index, graph.pos, graph.nums)
-        # print(x.shape, graph.edge_index.shape, graph.edge_attr.shape)
-        # print(graph.edge_attr)
+    if args.plot:
+        mathml = MathmlDataset.MathmlDataset(xml_name,latex_set=latex_set,debug=debug, force_reload=False)
+        vocab = VocabBuilder.VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=False, reload_xml_elements=False)
+        dataset = GraphDataset.GraphDataset(mathml.xml_dir,vocab, force_reload=False, debug=debug, max_num_nodes=100)
 
-        # z = model.encode(x, graph.edge_index, graph.edge_attr)
-        # print(z.shape)
-
-        # x_p = model.decoder.node_decoder(z,graph.edge_index, graph.edge_attr)
-        # print(x_p.shape)
-
-        # edge_recon = model.decoder.edge_decoder(z,graph.edge_index)
-        # print(edge_recon, edge_recon.shape)
-
-        # loss = model.recon_full_loss(z, x, graph.edge_index, None, graph.edge_attr, 1,1, 1)
-        # loss = loss + (1 / graph.num_nodes) * model.kl_loss()
-        # print(loss)
-
-        # neg_edge_index = negative_sampling(graph.edge_index, graph.size(0))
-        # accuracy = model.calculate_accuracy(z,graph.edge_index,neg_edge_index, graph.x, graph.edge_attr,)
-        # print(accuracy)
-        # # stuff = model.test(z,x,graph.edge_index,neg_edge_index, graph.x, graph.edge_attr)
-        # # # auc, ap = model.test(z, graph.edge_index, neg_edge_index)
-        # # print("NODE, ADJ, EDGES: ",stuff)
-
-        # node_sim, adj_sim, edge_sim = model.calculate_similarity(z,x, graph.edge_index, graph.edge_attr)
-        # print("SIM: ", node_sim,adj_sim, edge_sim)
-
-        # node, adjency, edges = model.decode_all(z,graph.edge_index)
-        # print(graph.x)
-        # print(node)
-
+        graph = dataset.get_graph_list()[-1]
+        plot.plot_graph(graph)
 
     if args.train:
-
+        dim = 512
         method = {
-            "onehot": {"tag":31,"concat":256},
-            "embed": {},
+            "onehot": {},
+            "embed": {"tag":256,"mi":dim, "mo":dim, "mtext":dim,"mn":dim},
             "linear": {},
-            "loss": "mse",
+            "loss": "cosine",
             "scale": "log",
         }
         if debug:
@@ -155,7 +116,8 @@ if __name__=="__main__":
         search.main(model_name, latex_set, vocab_type, xml_name,epochs)
 
     if args.test:
-        test.main()
+        # test.test_all_models(model_name)
+        test.main(model_name)
 
     if args.stats:
         # stats.xml_occurences()
@@ -172,6 +134,12 @@ if __name__=="__main__":
         out_path = "/data/nsam947/Freshwater-Modelling/trained_models/concat_search_var"
         # stats.extract_data_from_search(path)
         # plot.plot_history_from_search("concat_search_var")
-        plot.plot_study("ablation_study")
+        plot.plot_study("concat_study")
+        # plot.plot_boxplot_hyperparameters("hyperopt_LAST")
 
         # stats.create_combined_dataframe(in_path,out_path)
+
+        # xml_path = "data/pre_processed/default/xml_elements.json"
+        # plot.plot_text_frequency_per_tag(xml_path)
+        # plot.plot_numbers_distribution(xml_path,"num_val_distrib")
+        # stats.test_different_feature_scalings()

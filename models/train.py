@@ -75,11 +75,15 @@ def main(model_name="GraphVAE_new",latex_set = "OleehyO",vocab_type="concat", xm
         "vocab_type":vocab_type,
         "method":method,
         "xml_name": xml_name,
-        "force_reload": force_reload
+        "force_reload": force_reload,
+        "train_edge_features":True,
+        "num_layers":2,
+        "out_channels":32,
+        "hidden_channels":512,
     }
 
 
-    grace_period = 15 if epochs != 1 else 1
+    grace_period = 10 if epochs != 1 else 1
 
     # ray.init()
     scaling_config = ScalingConfig(num_workers=1, use_gpu=True,trainer_resources={"CPU": 8}) # trainer_resources={"cpu":8}
@@ -197,6 +201,8 @@ def train_model(train_config: dict):
     sparse_edges = config.get("gen_sparse_edges",True)
     train_edge_features = config.get("train_edge_features",False)
 
+    mn_type = config.get("mn_type","embed")
+
     # Build method dict
     if method is None:
         embed = config.get("embed_method","onehot")
@@ -210,12 +216,26 @@ def train_model(train_config: dict):
             "embed":{},
             "linear":{},
             "loss": "cross_entropy" if embed == "onehot" else "cosine",
+            # "loss": "cross_entropy" if embed == "onehot" else config.get("loss","cosine"),
             "scale": "log",
         }
-        for component in ["tag","concat","pos","combined","mi","mo","mtext","mn"]:
+        # for component in ["tag","concat","pos","combined","mn","mi","mo","mtext"]:
+        for component in ["tag","concat","pos","combined","split"]:
             dim = config.get(f"{component}_dim",None)
             if dim is not None:
-                method[embed].update({component:dim})
+                if component == "split":
+                    method[embed].update({
+                        "mi":dim,
+                        "mo":dim,
+                        "mtext":dim,
+                        "mn":dim,
+                    })
+                    # if mn_type == "linear":
+                    #     method["linear"] = {"mn":dim}
+                    # else:
+                    #     method["embed"] = {"mn":dim}
+                else:
+                    method[embed].update({component:dim})
         
     
     print("The embedding method is: ",method)

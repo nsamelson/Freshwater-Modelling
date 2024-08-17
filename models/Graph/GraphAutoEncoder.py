@@ -350,7 +350,8 @@ class GraphVAE(VGAE):
 
                 recovered_numbers = torch.matmul(x_embed - b, W_inv.t()).squeeze()
                 recovered_scaled = self.reverse_feature_scale(recovered_numbers)
-
+                
+                mask = (data["tag"] == MATHML_TAGS.index(vocab)) 
                 data["nums"][mask] = recovered_scaled[mask]
                 vector_index += embed_dim
 
@@ -459,6 +460,12 @@ class GraphVAE(VGAE):
         recon_indices = recon_data["x"]
         accuracy = (recon_indices == x_indices).float().mean().item()
         # TODO: add accuracy for pos and tags
+
+        # non_zero_indices = x_indices.nonzero()
+        # x_act = x_indices[non_zero_indices]
+        # x_pred = recon_indices[non_zero_indices]
+        # new_acc = (x_pred == x_act).float().mean().item()
+        # print(new_acc, accuracy)
 
         return accuracy, similarity
 

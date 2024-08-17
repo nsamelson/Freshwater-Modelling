@@ -19,6 +19,7 @@ from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
 from preprocessing.GraphDataset import GraphDataset
 from utils import stats
+from utils import plot
 from utils.plot import plot_training_graphs, plot_hyperparam_search, plot_training_history
 from utils.stats import extract_data_from_search
 from utils.save import json_dump
@@ -27,7 +28,7 @@ import tempfile
 
 
 
-def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samples=1,gpus_per_trial=float(1/4)):
+def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samples=50,gpus_per_trial=float(1/4)):
 
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
@@ -50,29 +51,47 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
         "model_name":model_name,
 
         # "concat_dim":256,
-        "combined_dim":256,
+        # "combined_dim":256,
         # "embed_method": "onehot",
         "tag_dim": 256,
+        "train_edge_features":True,
+        "pos_dim":None,
+        "split_dim": 256,
+        "embed_method":"freq_embed",
+        "num_layers":2,
+        "out_channels":32,
+        "hidden_channels":512,
 
-        "train_edge_features": tune.grid_search([True,False]),
+
+        # "alpha": tune.qloguniform(0.5, 1,5e-2),
+        # "beta": tune.qloguniform(0.5, 1,5e-2),
+        # "gamma": tune.qloguniform(0.5, 1,5e-2),        
+        "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
+        "batch_size": tune.choice([64, 128, 256, 512, 1024]),
+        # "variational": tune.grid_search([True,False]),
+        # "mn_type": tune.grid_search(["embed","linear"]),
+        # "mn_dim": tune.grid_search([None,256]),
+        # "mi_dim": tune.grid_search([None,256]),
+        # "mo_dim": tune.grid_search([None,256]),
+        # "mtext_dim": tune.grid_search([None,256]),
+        # "train_edge_features": tune.grid_search([True,False]),
+        # "split_dim":tune.grid_search([64,256,512,1024]),
+        # "pos_dim": tune.grid_search([None,256]),
         # "tag_dim": tune.grid_search([None,256]),
-        "pos_dim": tune.grid_search([None,256]),
         # "concat_dim": tune.grid_search([256,512,1024]),
-        # "loss": tune.grid_search(["mse","cross_entropy","cosine"]),
-        "embed_method": tune.grid_search(["onehot","embed","freq_embed"])
+        # "loss": tune.grid_search(["mse","cosine"]),
+        # "embed_method": tune.grid_search(["onehot","freq_embed"])
         # "scale_grad_by_freq": tune.grid_search([True,False]),
-        # "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
-        # "num_layers": tune.choice([2,3,4,5,6,7]),
-        # "hidden_channels": tune.choice([16,32,64,128,256,512]),
-        # "out_channels": tune.choice([8,16,32,64,128]),
+        # "num_layers": tune.grid_search([2,3,4,5,6]),
+        # "hidden_channels": tune.grid_search([32,64,128,256,512]),
+        # "out_channels": tune.grid_search([8,16,32,64]),
         # "embedding_dims":tune.choice([10,50,100,200,500,1000]),
-        # "batch_size": tune.choice([64, 128, 256,512,1024]),
         # "layer_type": tune.choice([GCNConv, GraphConv]),
   
     }
 
-    hyperopt_search = HyperOptSearch(metric="val_loss", mode="min")
-    grace_period = 15
+    hyperopt_search = HyperOptSearch(metric="val_acc", mode="max")
+    grace_period = 10
 
     # Define ASHA scheduler
     asha_scheduler = ASHAScheduler(
@@ -110,8 +129,8 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
                 resources={"cpu": 8, "gpu": gpus_per_trial}
             ),
             tune_config=tune.TuneConfig(
-                # search_alg=hyperopt_search,  
-                # scheduler=asha_scheduler,  
+                search_alg=hyperopt_search,  
+                scheduler=asha_scheduler,  
                 num_samples=num_samples,  # Adjust based on your budget
             ),
             param_space=search_space,
@@ -119,7 +138,7 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
                 name=model_name,
                 storage_path=storage_path,
                 failure_config=config.FailureConfig(max_failures=-1),
-                # stop=stopper
+                stop=stopper
             )
         )
 
@@ -177,7 +196,8 @@ def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samp
     try:
         extract_data_from_search(trials_dir)
         stats.create_combined_dataframe(trials_dir,f"trained_models/{model_name}")
-        plot_hyperparam_search(dir_path)
+        # plot_hyperparam_search(dir_path)
+        plot.plot_boxplot_hyperparameters(model_name)
     except Exception as e:
         print(f"Couldn't create boxplot of hyperparams search")
 
