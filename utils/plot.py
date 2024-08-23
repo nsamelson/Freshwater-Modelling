@@ -766,12 +766,13 @@ def plot_study(model_name):
     # df['mn_dim'] = df['mn_dim'].fillna('NaN')
     # df['mo_dim'] = df['mo_dim'].fillna('NaN')
     # df['mtext_dim'] = df['mtext_dim'].fillna('NaN')
+    df['pos_dim'] = df['pos_dim'].fillna('NaN')
 
     group_names = ["mi", "mo", "mn", "mtext"]
-    groups = df.groupby(['alpha',"beta","gamma","variational","folder"])
+    groups = df.groupby(["embed_method",'train_edge_features',"pos_dim","vocab_type","folder"])
     print(len(list(groups)))
-    rows = [True,False]
-    row_names = ["Variational","Non-Variational"]
+    rows = ["onehot"]
+    row_names = ["onehot"]
 
     metrics = [('val_loss','loss'),("val_acc","train_acc"),("val_sim","train_sim")]
     metric_names = ["loss","accuracy","similarity"]
@@ -787,26 +788,27 @@ def plot_study(model_name):
                 ax = axs[j,i]
 
 
-            for k,((alpha, beta, gamma, variational, folder), group) in enumerate(groups):
+            for k,((embed_method, train_edge_features, pos_dim, vocab_type, folder), group) in enumerate(groups):
                 # if embed_method == "embed" and split_dim == method:
-                # if embed_method == method: 
+                if embed_method == row: 
+                    group_label = vocab_type
                 #     # group_label = f'pos: {pos_dim}, ef: {train_edge_features}'
                 #     group_label = f"{split_dim * 4} dims"
                     # group_label = [group_names[l] for l, compo in enumerate([mi_dim, mo_dim, mn_dim, mtext_dim]) if compo !="NaN"]
                     # for l, compo in enumerate([mi_dim, mo_dim, mn_dim, mtext_dim]):
                     #     group_label += "" if compo =="NaN" else f" + {group_names[l]}"
-                    # group_label += " + ef" if train_edge_features else ""
-
+                    group_label += " + pos" if pos_dim=="NaN" else ""
+                    group_label += " + ef" if train_edge_features else ""
                     # if len(group_label) < 3:
                     #     continue
                     # else:
                     #     group_label = "+".join(group_label)
-                
-                if alpha + beta + gamma >= 2 and variational == row:
-                    group_label = r"$\lambda_A$: {}, $\lambda_X$: {}, $\lambda_E$: {}".format(alpha, beta, gamma)
+
+                # if alpha + beta + gamma >= 2 and variational == row:
+                #     group_label = r"$\lambda_A$: {}, $\lambda_X$: {}, $\lambda_E$: {}".format(alpha, beta, gamma)
 
                     if group_label not in group_labels.keys():
-                        print(group_label, colors[color_index])
+                        print(group_label, colors[color_index], embed_method, train_edge_features, pos_dim, )
                         group_labels[group_label]= colors[color_index]
 
                         
@@ -820,19 +822,25 @@ def plot_study(model_name):
             #     axs[i].set_ylim(0.05,1.05)
             # if ("acc" in metric[0] or "sim" in metric[0]) and j==1:
             #     axs[j,i].set_ylim(0.3,0.95)
-            if "acc" in metric[0]:
-                axs[j,i].set_ylim(0.15,0.95)
+            # if "acc" in metric[0]:
+            #     axs[j,i].set_ylim(0.15,0.95)
             # if "sim" in metric[0]:
             #     axs[j,i].set_ylim(0.6,1)
 
+            # if "sim" in metric[0]:
+            #     ax.set_ylim(0.2,0.9)
+
             if i==0:
-                ax.set_ylabel(f"Variational: {rows[j]}")
+                ax.set_ylabel(f"{row_names[j]}: {metric_names[i]}")
             else:
                 ax.set_ylabel(metric_names[i])
 
-            if j==0:
+            if j==0 :
                 ax.set_title(f'Train and val {metric_names[i]}')
-                ax.set_xlabel("")
+                if len(rows) == 1:
+                    ax.set_xlabel('Epoch')
+                else:
+                    ax.set_xlabel("")
             else:
                 ax.set_xlabel('Epoch')
             ax.grid(True)
@@ -843,19 +851,26 @@ def plot_study(model_name):
         handle = plt.Line2D([0], [1], color=color, label=label)
         handles.append(handle)
         labels.append(label)
-    axs[1,-1].legend(handles=handles, labels=labels, loc='lower right')
+
+    if len(rows) == 1:
+        axs[1].legend(handles=handles, labels=labels, loc='lower right')
+    else:
+        axs[1,-1].legend(handles=handles, labels=labels, loc='lower right')
 
     train_handle = plt.Line2D([0], [0], color='black', linestyle='dashed', label='Training')
     val_handle = plt.Line2D([0], [0], color='black', linestyle='solid', label='Validation')
     handles = [train_handle,val_handle]
     labels = ['Training', 'Validation']
-    axs[0,-1].legend(handles=handles, labels=labels, loc='lower right')
 
+    if len(rows) == 1:
+        axs[-1].legend(handles=handles, labels=labels, loc='lower right')
+    else:
+        axs[0,-1].legend(handles=handles, labels=labels, loc='lower right')
 
     plt.tight_layout(rect=[0,0, 1, 1])
     # plt.suptitle("Ablation Study",fontsize=16)
 
-    version = "_one_out"
+    version = "_NEW"
 
     plt.savefig(f'trained_models/{model_name}/loss_acc_sim{version}.png')
     plt.savefig(f'trained_models/{model_name}/loss_acc_sim{version}.pdf')

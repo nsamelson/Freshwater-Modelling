@@ -134,12 +134,12 @@ if __name__=="__main__":
         out_path = "/data/nsam947/Freshwater-Modelling/trained_models/concat_search_var"
         # stats.extract_data_from_search(path)
         # plot.plot_history_from_search("concat_search_var")
-        plot.plot_study("concat_study")
+        # plot.plot_study("ablation_study")
         # plot.plot_boxplot_hyperparameters("hyperopt_LAST")
 
         # stats.create_combined_dataframe(in_path,out_path)
 
-        # xml_path = "data/pre_processed/default/xml_elements.json"
+        xml_path = "data/pre_processed/default/xml_elements.json"
         # plot.plot_text_frequency_per_tag(xml_path)
-        # plot.plot_numbers_distribution(xml_path,"num_val_distrib")
+        plot.plot_numbers_distribution(xml_path,"num_val_distrib")
         # stats.test_different_feature_scalings()
