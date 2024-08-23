@@ -152,25 +152,26 @@ def count_text_occurences_per_tag(xml_path="dataset/raw/cleaned_formulas_katex.x
     # plot.plot_text_frequency_per_tag("out/text_per_tag_katex.json")
     
 def test_different_feature_scalings():
-    seed_value = 0
-    random.seed(seed_value)
+    seed_value = 42
+    # random.seed(seed_value)
     np.random.seed(seed_value)
-    torch.manual_seed(seed_value)
-    torch.cuda.manual_seed(seed_value)
-    torch.cuda.manual_seed_all(seed_value)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # torch.manual_seed(seed_value)
+    # torch.cuda.manual_seed(seed_value)
+    # torch.cuda.manual_seed_all(seed_value)
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
     with open("out/text_per_tag_katex.json","r") as f:
         text_occurences_per_tag = json.load(f)
 
     num_values = text_occurences_per_tag["mn"]
     num_list = []
-    for key, value in num_values.items():
+    for key,value in num_values.items():
         try:
-            key = float(key)
-            if key <= 1e6:
-                num_list += [key] * value
+            num = float(key)
+            if num <= 1e6:
+                num_list.extend([num]*value)
+            # numbers.extend([num]*value)
         except:
             continue
 
@@ -178,13 +179,7 @@ def test_different_feature_scalings():
     # flat_numbers = [x for xs in numbers_occ for x in xs]
     num_vec = np.array(num_list,dtype=np.float32)
     np.random.shuffle(num_vec)
-    numbers = num_vec.reshape(-1,16)
-
-    # print(numbers[0])
-
-    dtype = torch.float32
-    # numbers = np.array([[0, 1e-2, 2e-1, 1],
-    #                     [3.14, 5e3, 5e2, 0.01]],dtype=np.float32)
+    numbers = np.reshape(num_vec,(-1,16))
 
     # min-max normalisation
     normed = normalize(numbers)
@@ -197,6 +192,10 @@ def test_different_feature_scalings():
     # Log transformation
     log_transformed = log_transform(numbers)
 
+    # Standardisation
+    std_val = np.std(numbers)
+    standardised = standardise(numbers,mean_val,std_val)
+
     # robust scaling
     scaler = RobustScaler()
     scaled = scaler.fit_transform(numbers)
@@ -204,15 +203,15 @@ def test_different_feature_scalings():
     reverse_scaled = scaler.inverse_transform(scaled)
 
     # box-cox transfo
-    pt = PowerTransformer(method='yeo-johnson', standardize=False)
+    pt = PowerTransformer(method='yeo-johnson', standardize=True)
     power_transformed = pt.fit_transform(numbers)
-    reverse_powered = pt.inverse_transform(power_transformed)
+    # reverse_powered = pt.inverse_transform(power_transformed)
 
 
     big_numbers = {
-        "original":numbers,
         "min-max_normalisation":normed,
         "mean_normalisation":mean_normed,
+        "standardisation":standardised,
         "log_transform":log_transformed,
         "robust_scaling":scaled,
         "power_transformation":power_transformed
@@ -238,7 +237,7 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
                 
                 # Load csv
                 results = pd.read_csv(progress_dir)
-                metrics_head = results.keys()[:4]
+                metrics_head = results.keys()[:10]
 
                 # generate history dict
                 history = {key:list(results[key]) for key in metrics_head}
@@ -264,8 +263,58 @@ def extract_data_from_search(path="data/ray_results/GAE_search_Pfhaler"):
 
     try:
         save.json_dump(f"trained_models/{name}/all_histories.json",trial_histories)
+        print(f"Saved the all histories under trained_models/{name}/all_histories.json")
     except Exception as e:
         print(f"couldn't save the histories because of {e}")
+
+
+def create_combined_dataframe(base_path, output_path):
+    data_list = []
+
+    output_file = os.path.join(output_path,"all_progress.csv")
+    
+    # Iterate through each training folder
+    for folder_name in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder_name)
+        
+        if os.path.isdir(folder_path):
+            # Load CSV file
+            csv_file = os.path.join(folder_path, 'progress.csv')
+            if os.path.isfile(csv_file):
+                df = pd.read_csv(csv_file)
+                columns_to_keep = list(df.columns[:10]) + [df.columns[14]]
+                df = df[columns_to_keep]
+            else:
+                print(f"CSV file not found in {folder_path}")
+                continue
+            
+            # Load JSON file
+            json_file = os.path.join(folder_path, 'params.json')
+            if os.path.isfile(json_file):
+                with open(json_file, 'r') as f:
+                    params = json.load(f)
+            else:
+                print(f"JSON file not found in {folder_path}")
+                continue
+            
+            # Extract parameters
+            params_df = pd.DataFrame([params] * len(df))
+            
+            # Combine metrics with parameters
+            combined_df = pd.concat([df, params_df], axis=1)
+            
+            # Add folder name for reference
+            combined_df['folder'] = folder_name
+            
+            # Append to the list
+            data_list.append(combined_df)
+    
+    # Concatenate all dataframes
+    full_df = pd.concat(data_list, ignore_index=True)
+    
+    # Save to CSV
+    full_df.to_csv(output_file, index=False)
+    print(f"Combined DataFrame saved to {output_file}")
 
 
 
@@ -302,3 +351,6 @@ def inverse_mean_normalize(normalized_number, mean, range_val):
 
 def normalize(number,min_val=0,max_val=1e6):
     return (number - min_val) / (max_val - min_val)
+
+def standardise(number,mean, std):
+    return (number - mean) / std

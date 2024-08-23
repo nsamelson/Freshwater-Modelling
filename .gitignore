@@ -2,6 +2,7 @@ libs/*
 venv/*
 out/*
 dataset/*
+data/*
 __pycache__
 node/node_modules/*
 trained_models/*

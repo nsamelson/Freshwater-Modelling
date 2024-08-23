@@ -29,13 +29,15 @@ import xml.etree.ElementTree as ET
 import torch_geometric.transforms as T
 from tqdm import tqdm
 from config import CONFIG
-from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
-from models.Graph.GraphDataset import GraphDataset
+# from preprocessing.GraphEmbedder import GraphEmbedder
+from preprocessing.MathmlDataset import MathmlDataset
+from preprocessing.GraphDataset import GraphDataset
+from preprocessing.VocabBuilder import VocabBuilder
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphVAE, GraphDecoder
 import random
 # from tensorboardX import SummaryWriter
 
-from utils.plot import plot_loss_graph, plot_training_graphs
+from utils.plot import plot_loss_graph, plot_training_graphs, plot_training_history
 from utils.save import json_dump
 import pandas as pd
 import tempfile
@@ -44,10 +46,19 @@ import tempfile
 
 
 
-def main(model_name="GraphVAE_1",epochs=200):
+def main(model_name="GraphVAE_new",latex_set = "OleehyO",vocab_type="concat", xml_name= "default", method= {"onehot":{"concat":256}}, epochs=200, force_reload=False):
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
-    trials_dir = os.path.join(storage_path, model_name)
+    tmp_dir = "/data/nsam947/tmp"
+
+
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
+    os.environ["RAY_TMPDIR"] = tmp_dir
+    ray.init()
+
+
+    # trials_dir = os.path.join(storage_path, model_name)
     # checkpoint_dir = os.path.join(trials_dir, "checkpoints")
     print("Current Working Directory:", os.getcwd())
 
@@ -56,14 +67,23 @@ def main(model_name="GraphVAE_1",epochs=200):
     config = {
         "model_name": model_name,
         "num_epochs": epochs,
-        "lr": 1e-3,
         "variational": True,
         "alpha": 1,
-        "beta": 1
+        "beta": 1,
+        "gamma":1,
+        "latex_set":latex_set,
+        "vocab_type":vocab_type,
+        "method":method,
+        "xml_name": xml_name,
+        "force_reload": force_reload,
+        "train_edge_features":True,
+        "num_layers":2,
+        "out_channels":32,
+        "hidden_channels":512,
     }
 
 
-    grace_period = 15 if epochs != 1 else 1
+    grace_period = 10 if epochs != 1 else 1
 
     # ray.init()
     scaling_config = ScalingConfig(num_workers=1, use_gpu=True,trainer_resources={"CPU": 8}) # trainer_resources={"cpu":8}
@@ -117,7 +137,7 @@ def main(model_name="GraphVAE_1",epochs=200):
         except:
             pass
 
-        metrics_head = results.keys()[:4]
+        metrics_head = results.keys()[:10]
         history = {key:list(results[key]) for key in metrics_head}
         # history["params"] = params
         
@@ -128,7 +148,8 @@ def main(model_name="GraphVAE_1",epochs=200):
         # Dump history of the best trial
         json_dump(f'{dir_path}/history.json',history)
         json_dump(f'{dir_path}/params.json',full_config)
-        plot_training_graphs(history,dir_path)
+        # plot_training_graphs(history,dir_path) # TODO: plot graphs
+        plot_training_history(history, dir_path)
     except Exception as e:
         print(f"Couldn't save history and plot graphs because of {e}")
 
@@ -141,7 +162,7 @@ def rename_classes(config:dict):
 
 
 def train_model(train_config: dict):
-    seed_value = 0
+    seed_value = 42
     random.seed(seed_value)
     np.random.seed(seed_value)
     torch.manual_seed(seed_value)
@@ -149,6 +170,7 @@ def train_model(train_config: dict):
     torch.cuda.manual_seed_all(seed_value)  # if using multiple GPUs
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    # generator = torch.Generator().manual_seed(seed_value)
 
     # load setup config and merge with training params
     config = CONFIG
@@ -159,35 +181,94 @@ def train_model(train_config: dict):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('CUDA availability:', device)
     
-    # load and setup dataset
-    root_dir = "/data/nsam947/Freshwater-Modelling/dataset/"
-    dataset = GraphDataset(root=root_dir, equations_file='cleaned_formulas_katex.xml',force_reload=False)  
-
-    data_size = len(dataset)
-    train_data = dataset[:int(data_size * 0.8)]
-    val_data = dataset[int(data_size * 0.8):int(data_size * 0.9)]
-
     # Get config for models
-    embedding_dim = config.get("embedding_dims",200)
-    in_channels = dataset.num_features + embedding_dim - 1
     hidden_channels=config.get("hidden_channels",32)
     out_channels= config.get("out_channels",16)
     layers = config.get("num_layers",4)
     layer_type=config.get("layer_type",GCNConv)
     scale_grad_by_freq = config.get("scale_grad_by_freq",True)
+    latex_set = config.get("latex_set","OleehyO")
+    vocab_type = config.get("vocab_type","concat")
+    method = config.get("method",None)
+    batch_norm = config.get("batch_norm",False)
+    shuffle = config.get("shuffle",False)
+    debug = config.get("debug",False)
+    xml_name = config.get("xml_name", "debug")
+    force_reload = config.get("force_reload", True)
+    epochs = config.get("num_epochs",200)
+    max_num_nodes = config.get("max_num_nodes",40)
+    # sample_edges = config.get("sample_edges","sparse")
+    sparse_edges = config.get("gen_sparse_edges",True)
+    train_edge_features = config.get("train_edge_features",False)
+
+    mn_type = config.get("mn_type","embed")
+
+    # Build method dict
+    if method is None:
+        embed = config.get("embed_method","onehot")
+
+        if embed == "freq_embed":
+            embed = "embed"
+            scale_grad_by_freq = True
+        
+        method = {
+            "onehot":{},
+            "embed":{},
+            "linear":{},
+            "loss": "cross_entropy" if embed == "onehot" else "cosine",
+            # "loss": "cross_entropy" if embed == "onehot" else config.get("loss","cosine"),
+            "scale": "log",
+        }
+        # for component in ["tag","concat","pos","combined","mn","mi","mo","mtext"]:
+        for component in ["tag","concat","pos","combined","split"]:
+            dim = config.get(f"{component}_dim",None)
+            if dim is not None:
+                if component == "split":
+                    method[embed].update({
+                        "mi":dim,
+                        "mo":dim,
+                        "mtext":dim,
+                        "mn":dim,
+                    })
+                    # if mn_type == "linear":
+                    #     method["linear"] = {"mn":dim}
+                    # else:
+                    #     method["embed"] = {"mn":dim}
+                else:
+                    method[embed].update({component:dim})
+        
+    
+    print("The embedding method is: ",method)
+        
+
+    print("Loading dataset...")
+
+    # load and setup dataset
+    mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug)
+    vocab = VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=force_reload)
+    dataset = GraphDataset(mathml.xml_dir,vocab, max_num_nodes= max_num_nodes, force_reload=force_reload, debug=debug)
+
+    train, val, _ = dataset.split(shuffle=shuffle)
+    
+    print(f"MathML dataset size: {len(mathml)} equations")
+    print(f"Dataset sizes: train= {len(train)} graphs, val= {len(val)} graphs. Max number of nodes per graph= {max_num_nodes}")
 
     # load models
-    encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, scale_grad_by_freq)
+    embedding_dim = sum(method["onehot"].values()) + sum(method["embed"].values()) + sum(method["linear"].values())
+
+    encoder = GraphEncoder(embedding_dim,hidden_channels,out_channels,layers,layer_type,batch_norm)
+    decoder = GraphDecoder(embedding_dim,hidden_channels,out_channels,layers,layer_type, edge_dim=1,batch_norm=batch_norm)
+    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq, sparse_edges, train_edge_features)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr",0.001))
+    scheduler = ReduceLROnPlateau(optimizer, 'min')
     model.to(device)
 
     
-    train_loader = DataLoader(train_data, batch_size=config.get("batch_size",256), shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_data, batch_size=config.get("batch_size",256), shuffle=False, num_workers=8)
+    train_loader = DataLoader(train, batch_size=config.get("batch_size",256), shuffle=True, num_workers=8)
+    val_loader = DataLoader(val, batch_size=config.get("batch_size",256), shuffle=False, num_workers=8)
     # test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=8)
+    # print("Number of nodes per batch: ", train_loader.dataset.))
 
     # Get checkpoint
     start = 0
@@ -201,12 +282,19 @@ def train_model(train_config: dict):
 
 
     # TRAINING LOOP
-    for epoch in range(start,config.get("num_epochs",500)):
+    print("Starting training...")
+    for epoch in range(start,epochs):
 
-        avg_train_loss = train_one_epoch(model,optimizer,train_loader,device,config)
-        avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,config)
+        train_loss, train_auc, train_ap, train_acc, train_sim = train_one_epoch(model,optimizer,train_loader,device,config)
+        val_loss, val_auc, val_ap, val_acc, val_sim = validate(model,val_loader,device,config)
 
-        metrics = {"loss": avg_train_loss, "val_loss": avg_val_loss, "auc":avg_auc,"ap":avg_ap}
+        # reduce learning rate
+        scheduler.step(val_loss)
+
+        metrics = {
+            "loss": train_loss, "train_auc": train_auc, "train_ap": train_ap, "train_acc": train_acc, "train_sim": train_sim, 
+            "val_loss": val_loss, "val_auc": val_auc, "val_ap": val_ap, "val_acc": val_acc, "val_sim": val_sim
+        }
         
         # session.report(metrics)
         with tempfile.TemporaryDirectory() as tempdir:
@@ -221,55 +309,86 @@ def train_one_epoch(model:GraphVAE,optimizer,train_loader,device, config ): # va
     # Training phase
     model.train()
     total_train_loss = 0
-
-    # Getting params
-    variational = config.get("variational",False)
-    force_undirected = config.get("force_undirected",True)
-    neg_sampling_method = config.get("neg_sampling_method","sparse")
-    alpha = config.get("alpha",1)
-    beta = config.get("beta",0)
-    
-    for batch in train_loader:
-        optimizer.zero_grad()
-        batch = batch.to(device)
-
-        # Generate negative edges
-        pos_edge_index = batch.edge_index
-        neg_edge_index = negative_sampling(
-            edge_index=pos_edge_index, 
-            num_nodes=batch.num_nodes, 
-            num_neg_samples=pos_edge_index.size(1),
-            force_undirected=force_undirected,
-            method=neg_sampling_method
-        ).to(device)
-
-        x = model.embed_x(batch.x)        
-        z = model.encode(x, batch.edge_index)
-        # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
-        loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index,alpha,beta)
-
-        if variational:
-            loss = loss + (1 / batch.num_nodes) * model.kl_loss()
-
-        loss.backward()
-        optimizer.step()
-        total_train_loss += loss.item()
-    
-    avg_train_loss = total_train_loss / len(train_loader)
-    return avg_train_loss
-
-def validate(model:GraphVAE,val_loader,device,config): # variational=False,force_undirected=True,neg_sampling_method="sparse"
-    model.eval()
-    total_val_loss = 0
+    total_acc = 0
+    total_sim = 0
     total_auc = 0
     total_ap = 0
 
     # Getting params
     variational = config.get("variational",False)
     force_undirected = config.get("force_undirected",True)
-    neg_sampling_method = config.get("neg_sampling_method","sparse")
+    neg_sampling_method = config.get("sample_edges","sparse")
     alpha = config.get("alpha",1)
     beta = config.get("beta",0)
+    gamma = config.get("gamma",0)
+    train_edge_features = config.get("train_edge_features",False)
+    
+    for i,batch in enumerate(train_loader):
+        # if i % 2 == 0:
+        #     print(f"Training batch #{i}..")
+        
+        optimizer.zero_grad()
+        batch = batch.to(device)
+
+        # Generate negative edges
+        # pos_edge_index = batch.edge_index.to(device)
+        num_edges = batch.num_nodes**2 if neg_sampling_method == "dense" else batch.edge_index.size(1)
+        neg_edge_index = negative_sampling(
+            edge_index=batch.edge_index, 
+            num_nodes=batch.num_nodes, 
+            num_neg_samples=num_edges,
+            force_undirected=force_undirected,
+            method=neg_sampling_method
+        ).to(device)
+        edge_weight = batch.edge_attr.to(device) if train_edge_features else None
+
+        x = model.embed_x(batch.x,batch.tag,batch.pos,batch.nums).to(device)         
+        z = model.encode(x, batch.edge_index, edge_weight)
+
+        # Loss calculation
+        loss = model.recon_full_loss(z, x, batch.edge_index, neg_edge_index, edge_weight, alpha, beta, gamma)
+        if variational:
+            loss = loss + (1 / batch.num_nodes) * model.kl_loss()
+
+        loss.backward()
+        optimizer.step()
+        total_train_loss += loss.item()
+
+        # AUC, AP
+        auc, ap = model.test(z, batch.edge_index, neg_edge_index)
+        total_auc += auc
+        total_ap += ap  
+
+        # Accuracy and similarity
+        acc, sim = model.test_nodes(z, batch.edge_index, x, batch.x, edge_weight)
+        total_acc += acc
+        total_sim += sim
+    
+    avg_train_loss = total_train_loss / len(train_loader)
+    avg_auc = total_auc / len(train_loader)
+    avg_ap = total_ap / len(train_loader)
+    avg_acc = total_acc / len(train_loader)
+    avg_sim = total_sim / len(train_loader)
+
+    return avg_train_loss, avg_auc, avg_ap, avg_acc, avg_sim
+
+def validate(model:GraphVAE,val_loader,device,config): # variational=False,force_undirected=True,neg_sampling_method="sparse"
+    model.eval()
+    total_val_loss = 0
+    total_auc = 0
+    total_ap = 0
+    total_acc = 0
+    total_sim = 0
+
+
+    # Getting params
+    variational = config.get("variational",False)
+    force_undirected = config.get("force_undirected",True)
+    neg_sampling_method = config.get("sample_edges","sparse")
+    alpha = config.get("alpha",1)
+    beta = config.get("beta",0)
+    gamma = config.get("gamma",0)
+    train_edge_features = config.get("train_edge_features",False)
 
     with torch.no_grad():
         for batch in val_loader:
@@ -277,185 +396,42 @@ def validate(model:GraphVAE,val_loader,device,config): # variational=False,force
 
             # Generate negative edges
             pos_edge_index = batch.edge_index
+            num_edges = batch.num_nodes**2 if neg_sampling_method == "dense" else pos_edge_index.size(1)
             neg_edge_index = negative_sampling(
                 edge_index=pos_edge_index, 
                 num_nodes=batch.num_nodes, 
-                num_neg_samples=pos_edge_index.size(1),
+                num_neg_samples=num_edges,
                 force_undirected=force_undirected,
                 method=neg_sampling_method
             ).to(device)
+            edge_weight = batch.edge_attr.to(device) if train_edge_features else None
             
-            x = model.embed_x(batch.x)        
-            z = model.encode(x, batch.edge_index)
-            # loss = model.recon_loss(z, pos_edge_index, neg_edge_index)
-            loss = model.recon_full_loss(z,x,pos_edge_index, neg_edge_index,alpha,beta)
+            x = model.embed_x(batch.x,batch.tag,batch.pos,batch.nums).to(device)          
+            z = model.encode(x, batch.edge_index,edge_weight)
 
+            # Loss
+            loss = model.recon_full_loss(z, x, pos_edge_index, neg_edge_index, edge_weight, alpha, beta, gamma)
             if variational:
                 loss = loss + (1 / batch.num_nodes) * model.kl_loss()
-
             total_val_loss += loss.item()
+
+            # AUC, AP
             auc, ap = model.test(z, pos_edge_index, neg_edge_index)
-            
             total_auc += auc
-            total_ap += ap    
+            total_ap += ap  
+
+            # Accuracy and similarity
+            acc, sim = model.test_nodes(z, pos_edge_index,x,batch.x, edge_weight)
+            total_acc += acc
+            total_sim += sim
 
     avg_val_loss = total_val_loss / len(val_loader)
     avg_auc = total_auc / len(val_loader)
     avg_ap = total_ap / len(val_loader)
-
-    return avg_val_loss, avg_auc, avg_ap
-
-
-
-    
-
-# def main():
-#     # Fix the randomness
-#     seed_value = 0
-#     random.seed(seed_value)
-#     np.random.seed(seed_value)
-#     torch.manual_seed(seed_value)
-#     torch.cuda.manual_seed(seed_value)
-#     torch.cuda.manual_seed_all(seed_value)  # if using multiple GPUs
-#     torch.backends.cudnn.deterministic = True
-#     torch.backends.cudnn.benchmark = False
+    avg_acc = total_acc / len(val_loader)
+    avg_sim = total_sim / len(val_loader)
 
 
-#     # # path = "/data/nsam947/ray_results/train_model_2024-06-05_18-10-34/train_model_2271f6c6_20_batch_size\=256\,hidden_channels\=32\,lr\=0.0011\,out_channels\=16_2024-06-05_18-50-55/result.json"
-#     # result_dir = "/data/nsam947/ray_results/train_model_2024-06-05_18-10-34/"
-#     # trials = os.listdir(result_dir)
-#     # trial_path = [path for path in trials if "2271f6c6" in path][0]
-#     # trial_path = os.path.join(result_dir,trial_path,"progress.csv")
-
-#     # result = pd.read_csv(trial_path)
-#     # # with open(trial_path,"r") as f:
-#     # #     result = json.load(f)
-    
-#     # metrics_head = result.keys()[:4]
-#     # metrics = {key:list(result[key]) for key in metrics_head}
-#     # plot_training_graphs(metrics,"out/")
-
-#     # return
-
-#     # Create dir for saving model
-#     dir_path = "trained_models/exp_5"
-#     if not os.path.exists(dir_path):
-#         os.mkdir(dir_path)
-
-#     # Setup device
-#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#     print('CUDA availability:', device)
-
-#     # Load dataset 
-#     print("Loading dataset...")
-#     # data augm
-#     # transform = T.Compose([
-#     #     # T.NormalizeFeatures(),
-#     #     T.ToDevice(device),
-#     #     # T.RandomNodeSplit()
-#     #     # T.RandomLinkSplit(num_val=0.05, num_test=0.1, is_undirected=True, # splits on the graph level, and in my case I have a list of graphs
-#     #     #     split_labels=False, add_negative_train_samples=False),
-#     # ])
-#     dataset = GraphDataset(root='dataset/', equations_file='cleaned_formulas_katex.xml',force_reload=False, debug=False) #transform=transform)
-#     in_channels = dataset.num_features
-#     vocab_size = dataset.vocab_size
+    return avg_val_loss, avg_auc, avg_ap, avg_acc, avg_sim
 
 
-#     print(dataset.get_summary())
-#     print("Number of input channels: ", in_channels)
-    
-#     # return
-
-#     data_size = len(dataset)
-#     train_data = dataset[:int(data_size * 0.8)]
-#     val_data = dataset[int(data_size * 0.8):int(data_size * 0.9)]
-#     test_data = dataset[int(data_size * 0.9):]
-
-#     # model = pyg_nn.VGAE(VariationalGCNEncoder(in_channels, 16))
-#     # model = pyg_nn.GAE(GraphSAGE(in_channels,hidden_channels=32,num_layers=4,out_channels=4))
-#     model = pyg_nn.GAE(Encoder(in_channels,16,8,embedding_dim=192,layers = 4,vocab_size=vocab_size,scale_grad_by_freq=False))
-#     # model = pyg_nn.GAE(GraphEncoder(in_channels, 16,8))
-#     variational=False
-
-
-#     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-#     # criterion = torch.nn.MSELoss()
-
-#     # Early stopping
-#     patience = 5  # Number of epochs to wait for improvement before stopping
-#     patience_counter = 0
-#     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.01, patience=patience, threshold=0.01)
-
-#     writer = SummaryWriter("log/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),comment="training")
-
-#     # Put model to device
-#     model = model.to(device)
-
-#     batch_size = 128
-#     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=8)
-#     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=8)
-#     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=8)
-
-#     # Training loop
-#     best_val_loss = float('inf')
-#     num_epochs = 25
-#     history = {"loss":[],"val_loss":[],"auc":[],"ap":[]}
-
-#     # Training loop
-#     for epoch in range(num_epochs):
-#         # Training phase
-#         avg_train_loss = train_one_epoch(model,optimizer,epoch,train_loader,device, variational=variational)
-        
-#         # validation phase
-#         avg_val_loss, avg_auc, avg_ap = validate(model,val_loader,device,variational=variational)
-        
-#         # Add to tensorboardX
-#         # writer.add_scalar("Loss/train", avg_train_loss, epoch)
-#         # writer.add_scalar("Loss/val", avg_val_loss, epoch)
-#         writer.add_scalars("Losses",{"train":avg_train_loss,"val":avg_val_loss},epoch)
-#         writer.add_scalar("Metrics/AUC", avg_auc, epoch)
-#         writer.add_scalar("Metrics/AP", avg_ap, epoch)
-
-#         history["loss"].append(avg_train_loss)
-#         history["val_loss"].append(avg_val_loss)
-#         history["auc"].append(avg_auc)
-#         history["ap"].append(avg_ap)
-
-#         print(f'Epoch: {epoch:03d}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, AUC: {avg_auc:.4f}, AP: {avg_ap:.4f}')
-        
-#         # Scheduler step
-#         scheduler.step(avg_val_loss)
-        
-#         # Early stopping
-#         if avg_val_loss < best_val_loss:
-#             best_val_loss = avg_val_loss
-#             patience_counter = 0
-#         else:
-#             patience_counter += 1
-        
-#         if patience_counter >= patience:
-#             print("Early stopping triggered")
-#             break
-    
-    
-
-#     # Save the best model
-#     try:
-#         torch.save(model.state_dict(), f'{dir_path}/model_weights.pt')
-#     except Exception as e:
-#         print(f"Couldn't save the model because of {e}")
-
-#     # Plot graphs and save data
-#     try:
-#         plot_training_graphs(history,dir_path)
-#         json_dump(f'{dir_path}/history.json',history)
-#     except Exception as e:
-#         print(f"Couldn't save history and plot graphs because of {e}")
-
-#     # Load the best model (if early stopping was triggered)
-#     try:
-#         model.load_state_dict(torch.load(f'{dir_path}/model_weights.pt'))
-#     except Exception as e:
-#         print(f"Couldn't load the model because of {e}")
-
-#     test_model(model,test_loader,device)

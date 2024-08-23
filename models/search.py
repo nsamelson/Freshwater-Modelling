@@ -17,17 +17,27 @@ from torch_geometric.loader import DataLoader
 from config import CONFIG
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 from models.train import train_model
-from models.Graph.GraphDataset import GraphDataset
-from utils.plot import plot_training_graphs, plot_hyperparam_search
+from preprocessing.GraphDataset import GraphDataset
+from utils import stats
+from utils import plot
+from utils.plot import plot_training_graphs, plot_hyperparam_search, plot_training_history
 from utils.stats import extract_data_from_search
 from utils.save import json_dump
 import tempfile
 
 
-def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name="GAE_search_channel_dims"):
+
+
+def main(model_name, latex_set, vocab_type, xml_name,max_num_epochs=50, num_samples=50,gpus_per_trial=float(1/4)):
 
     storage_path= "/data/nsam947/Freshwater-Modelling/data/ray_results"
     work_dir = "/data/nsam947/Freshwater-Modelling"
+    tmp_dir = "/data/nsam947/tmp"
+
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
+    os.environ["RAY_TMPDIR"] = tmp_dir
+    
     trials_dir = os.path.join(storage_path, model_name)
     # checkpoint_dir = os.path.join(trials_dir, "checkpoints")
     print("Current Working Directory:", os.getcwd())
@@ -35,19 +45,52 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
     # Parameters to tune
     search_space = {
         "num_epochs":max_num_epochs,
+        "latex_set":latex_set,
+        "vocab_type":vocab_type,
+        "xml_name":xml_name,
+        "model_name":model_name,
+
+        # "concat_dim":256,
+        # "combined_dim":256,
+        # "embed_method": "onehot",
+        "tag_dim": 256,
+        "train_edge_features":True,
+        "pos_dim":None,
+        "split_dim": 256,
+        "embed_method":"freq_embed",
+        "num_layers":2,
+        "out_channels":32,
+        "hidden_channels":512,
+
+
+        # "alpha": tune.qloguniform(0.5, 1,5e-2),
+        # "beta": tune.qloguniform(0.5, 1,5e-2),
+        # "gamma": tune.qloguniform(0.5, 1,5e-2),        
         "lr": tune.qloguniform(1e-5, 1e-2,5e-6),
-        "num_layers": tune.choice([2,3,4,5,6,7]),
-        "hidden_channels": tune.choice([16,32,64,128,256,512]),
-        "out_channels": tune.choice([8,16,32,64,128]),
-        "embedding_dims":tune.choice([10,50,100,200,500,1000]),
-        # "batch_size": tune.choice([64, 128, 256,512,1024]),
+        "batch_size": tune.choice([64, 128, 256, 512, 1024]),
+        # "variational": tune.grid_search([True,False]),
+        # "mn_type": tune.grid_search(["embed","linear"]),
+        # "mn_dim": tune.grid_search([None,256]),
+        # "mi_dim": tune.grid_search([None,256]),
+        # "mo_dim": tune.grid_search([None,256]),
+        # "mtext_dim": tune.grid_search([None,256]),
+        # "train_edge_features": tune.grid_search([True,False]),
+        # "split_dim":tune.grid_search([64,256,512,1024]),
+        # "pos_dim": tune.grid_search([None,256]),
+        # "tag_dim": tune.grid_search([None,256]),
+        # "concat_dim": tune.grid_search([256,512,1024]),
+        # "loss": tune.grid_search(["mse","cosine"]),
+        # "embed_method": tune.grid_search(["onehot","freq_embed"])
+        # "scale_grad_by_freq": tune.grid_search([True,False]),
+        # "num_layers": tune.grid_search([2,3,4,5,6]),
+        # "hidden_channels": tune.grid_search([32,64,128,256,512]),
+        # "out_channels": tune.grid_search([8,16,32,64]),
+        # "embedding_dims":tune.choice([10,50,100,200,500,1000]),
         # "layer_type": tune.choice([GCNConv, GraphConv]),
-        # "scale_grad_by_freq":tune.choice([True,False]),
-        # "sample_edges":tune.choice(["dense","sparse"]),
-        # "variational":tune.choice([True,False])
+  
     }
 
-    hyperopt_search = HyperOptSearch(metric="val_loss", mode="min")
+    hyperopt_search = HyperOptSearch(metric="val_acc", mode="max")
     grace_period = 10
 
     # Define ASHA scheduler
@@ -74,7 +117,7 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
             trials_dir, 
             trainable=tune.with_resources(
                 tune.with_parameters(train_model),
-                resources={"cpu": 6, "gpu": gpus_per_trial}
+                resources={"cpu": 8, "gpu": gpus_per_trial}
             ), 
             resume_errored=True,
             param_space= search_space
@@ -83,7 +126,7 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
         tuner = tune.Tuner(
             trainable=tune.with_resources(
                 tune.with_parameters(train_model),
-                resources={"cpu": 6, "gpu": gpus_per_trial}
+                resources={"cpu": 8, "gpu": gpus_per_trial}
             ),
             tune_config=tune.TuneConfig(
                 search_alg=hyperopt_search,  
@@ -100,8 +143,8 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
         )
 
     results = tuner.fit()
-    best_result = results.get_best_result("val_loss", "min","all")
-    best_model = best_result.get_best_checkpoint("val_loss","min")
+    best_result = results.get_best_result("val_acc", "max","all")
+    best_model = best_result.get_best_checkpoint("val_acc","max")
 
     # Print the best results
     print("Best trial config: {}".format(best_result.config))
@@ -131,29 +174,38 @@ def main(num_samples=200,max_num_epochs=100,gpus_per_trial=float(1/6),model_name
         with open(params_path,"r") as f:
             params = json.load(f)
 
-        metrics_head = results.keys()[:4]
+        metrics_head = results.keys()[:10]
         history = {key:list(results[key]) for key in metrics_head}
         # history["params"] = params
 
         full_config = CONFIG
         full_config.update(params)
+        full_config = rename_classes(full_config)
         # Dump history of the best trial
         json_dump(f'{dir_path}/history.json',history)
         json_dump(f'{dir_path}/params.json',full_config)
 
         # # Dump history of the best trial
         # json_dump(f'{dir_path}/history.json',history)
-        plot_training_graphs(history,dir_path)
+        # plot_training_graphs(history,dir_path)
+        plot_training_history(history, dir_path)
     except Exception as e:
         print(f"Couldn't save history and plot graphs because of {e}")
 
     # Plot the hyperparam search
     try:
         extract_data_from_search(trials_dir)
-        plot_hyperparam_search(dir_path)
+        stats.create_combined_dataframe(trials_dir,f"trained_models/{model_name}")
+        # plot_hyperparam_search(dir_path)
+        plot.plot_boxplot_hyperparameters(model_name)
     except Exception as e:
         print(f"Couldn't create boxplot of hyperparams search")
 
+def rename_classes(config:dict):
+    for key, value in config.items():
+        if 'class' in str(value):
+            config[key] = str(value).split('.')[-1].strip(">'")
+    return config
 
 
 # def train_model(config={}):

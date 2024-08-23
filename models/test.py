@@ -28,32 +28,32 @@ from xml.etree.ElementTree import tostring
 import torch_geometric.transforms as T
 from tqdm import tqdm
 from models.train import validate
-from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
-from models.Graph.GraphDataset import GraphDataset
+# from preprocessing.GraphEmbedder import GraphEmbedder, MATHML_TAGS
+from preprocessing.MathmlDataset import MathmlDataset
+from preprocessing.GraphDataset import GraphDataset
 from models.Graph.GraphAutoEncoder import GraphEncoder, GraphDecoder, GraphVAE
 import random
 
+from config import CONFIG, MATHML_TAGS
+from utils import plot
+from collections import OrderedDict
 
+from preprocessing.VocabBuilder import VocabBuilder
 from utils.plot import plot_loss_graph, plot_training_graphs
 from utils.save import json_dump
 import pandas as pd
 import tempfile
 
-os.environ["OPENBLAS_NUM_THREADS"] = "128"
+# os.environ["OPENBLAS_NUM_THREADS"] = "128"
 
-def main(model_name="GraphVAE_1"):
+def main(model_name="default", sample_latex_set="sample", sample_xml_name="sample", sample_vocab_type="split"):
     dir_path = os.path.join("trained_models",model_name)
     params_path = os.path.join(dir_path,"params.json")
     model_path = os.path.join(dir_path,"checkpoint.pt")
-
-    with open(params_path,"r") as f:
-        config = json.load(f)
-
-    test_model(config,model_path)
+    latex_path = os.path.join("dataset/latex_examples.json")
 
 
-def test_model(config:dict, model_path:str):
-    seed_value = 0
+    seed_value = 42
     random.seed(seed_value)
     np.random.seed(seed_value)
     torch.manual_seed(seed_value)
@@ -62,42 +62,305 @@ def test_model(config:dict, model_path:str):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    with open(params_path,"r") as f:
+        params = json.load(f)
+    
+    with open(latex_path,"r") as f:
+        latex_eqs = json.load(f)
+
+    config = CONFIG
+    test_loader = None
+    vocab = None  
+
+    if "train_loop_config" in params:
+        train_config = params.get("train_loop_config",{})
+        params.update(train_config)
+
+
+    config.update(params)
+    max_num_nodes = config.get("max_num_nodes",40)
+    xml_name = config.get("xml_name", "debug")
+    latex_set = config.get("latex_set","OleehyO")
+    vocab_type = config.get("vocab_type","concat")
+
     # Set to device
-    # device = 'cpu'
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print('CUDA availability:', device)
+    
+    sample, vocab = load_dataset(sample_xml_name, sample_latex_set, False, False, max_num_nodes, sample_vocab_type, False, False)
+    sample_loader = DataLoader(sample, batch_size=256, shuffle=False, num_workers=8)
+
+    metrics, model = test_model(config, model_path, sample_loader, vocab, device)
+    sample_recon_z, sample_recon_g = reconstruct(model,sample_loader, device, config)
+    print(metrics)
+
+    latent_space_file = os.path.join(dir_path, "latent_space.npy")
+    if os.path.exists(latent_space_file):
+        test_recon_z = np.load(latent_space_file)
+        print(f"Loaded from saved numpy file of size {test_recon_z.shape}")
+    else:
+        test, vocab = load_dataset(xml_name, latex_set, False, False, max_num_nodes, vocab_type, False, False)
+        test_loader = DataLoader(test, batch_size=256, shuffle=False, num_workers=8)
+
+        test_recon_z, test_recon_g = reconstruct(model, test_loader, device, config)
+        np.save(latent_space_file, test_recon_z)
+        print("Saved latent space to numpy file")
+
+    # select only a few
+    np.random.shuffle(test_recon_z)
+    test_recon_z = test_recon_z[0:2000]
+
+    sample_indices = [0,1,4,8,9]
+    sample_labels = [latex_eqs["train"][i] for i in sample_indices]
+
+    # Prepare data for t-SNE
+    all_embeddings = np.concatenate([test_recon_z, sample_recon_z[sample_indices]], axis=0)
+    test_labels = np.concatenate([np.zeros(len(test_recon_z)), np.array([1,2,3,4,5])])
+    
+
+    tsne_results = apply_tsne(all_embeddings)
+    pca_resuts = apply_pca(all_embeddings)
+
+    plot.plot_tsne_n_pca(tsne_results, pca_resuts, test_labels, sample_labels, model_name)
+
+
+
+def load_dataset(xml_name, latex_set, debug, force_reload, max_num_nodes, vocab_type, shuffle, split_set = True):
+        print("Loading dataset...")
+        mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug,force_reload=False)
+        vocab = VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=False)
+        dataset = GraphDataset(mathml.xml_dir,vocab, max_num_nodes= max_num_nodes, force_reload=force_reload, debug=debug)
+
+        if split_set:
+            _, _, test = dataset.split(shuffle=shuffle)
+        else:
+            test = dataset
+
+        # test_loader = DataLoader(test, batch_size=batch_size, shuffle=False, num_workers=8)
+
+        print(f"MathML dataset size: {len(mathml)} equations")
+        print(f"Dataset sizes: test= {len(test)} graphs. Max number of nodes per graph= {max_num_nodes}")
+        return test, vocab
+
+
+def test_all_models(model_name="default"):
+
+    dir_path = os.path.join("data","ray_results",model_name)
+    out_path = os.path.join("trained_models",model_name)
+
+    experiments_data = []
+
+    
+
+    # generator = torch.Generator().manual_seed(seed_value)
+
+    # load setup config and merge with training params
+    config = CONFIG
+
+    test = None
+    vocab = None    
+    
+
+    # Set to device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('CUDA availability:', device)
 
-    # load and setup dataset
-    root_dir = "/data/nsam947/Freshwater-Modelling/dataset/"
-    dataset = GraphDataset(root=root_dir, equations_file='cleaned_formulas_katex.xml',force_reload=False)  
+    for i, folder_name in enumerate(sorted(os.listdir(dir_path))): 
+        expe_folder = os.path.join(dir_path, folder_name)
 
-    data_size = len(dataset)
-    test_data = dataset[int(data_size * 0.9):]
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=8)
+        if os.path.isdir(expe_folder):
+            
+            # get progress and find best training iteration
+            progress_csv_path = os.path.join(expe_folder, 'progress.csv')
+            if os.path.exists(progress_csv_path):
+                progress_data = pd.read_csv(progress_csv_path)
+                best_row = progress_data.loc[progress_data.iloc[:, 5].idxmin()] # val_loss
+                best_iteration = best_row.iloc[14] - 1 # iteration
 
-    # Get channels for layers
-    embedding_dim = config.get("embedding_dims",200)
-    in_channels = dataset.num_features + embedding_dim - 1
+                best_checkpoint_path = os.path.join(expe_folder, f"checkpoint_{str(int(best_iteration)).zfill(6)}", "checkpoint.pt")
+                print("Best checkpoint path based on val_loss:", best_checkpoint_path)
+
+            # checkpoints = sorted(os.listdir(expe_folder)) 
+            # last_checkpoint_path = os.path.join(expe_folder, checkpoints[-1],"checkpoint.pt")
+            # print("Checkpoint: ", last_checkpoint_path)
+
+            json_file = os.path.join(expe_folder, 'params.json')
+            if os.path.isfile(json_file):
+                with open(json_file, 'r') as f:
+                    params = json.load(f)
+            else:
+                print(f"JSON file not found in {expe_folder}")
+                continue
+
+            # print(f"Current configuration: {params}")
+            if "train_loop_config" in params:
+                config.update(params.get("train_loop_config",{}))
+            
+            config.update(params)
+
+            xml_name = config.get("xml_name", "debug")
+            latex_set = config.get("latex_set","OleehyO")
+            vocab_type = config.get("vocab_type","concat")
+            debug = config.get("debug",False)
+            force_reload = config.get("force_reload", False)
+            max_num_nodes = config.get("max_num_nodes",40)
+            shuffle = config.get("shuffle",False)
+
+            batch_size = config.get("batch_size",256)
+
+            print("Training #: ", i)
+
+            if test == None:
+                test, vocab = load_dataset(xml_name, latex_set, debug, force_reload, max_num_nodes, vocab_type, shuffle)
+            
+
+            test_loader = DataLoader(test, batch_size=batch_size, shuffle=False, num_workers=8)
+            metrics, _ = test_model(config, best_checkpoint_path, test_loader, vocab, device)
+
+            combined_data = {**params, **metrics}
+            experiments_data.append(combined_data)
+    
+    df = pd.DataFrame(experiments_data)
+    
+    # Save the DataFrame to a CSV file
+    df.to_csv(os.path.join(out_path, 'experiments_results_test_set.csv'), index=False)
+    print(df)
+
+
+
+
+def test_model(config:dict, model_path:str, test_loader, vocab, device):
+    seed_value = 42
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    torch.cuda.manual_seed(seed_value)
+    torch.cuda.manual_seed_all(seed_value)  # if using multiple GPUs
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.cuda.empty_cache()
+
+    # Get config for models
     hidden_channels=config.get("hidden_channels",32)
     out_channels= config.get("out_channels",16)
     layers = config.get("num_layers",4)
-    sclae_grad_by_freq = config.get("scale_grad_by_freq",True)
     layer_type=config.get("layer_type",GCNConv)
-    layer_type = load_class_from_string(pyg_nn,layer_type)
+    scale_grad_by_freq = config.get("scale_grad_by_freq",True)
+    method = config.get("method",None)
+    batch_norm = config.get("batch_norm",False)
+    sparse_edges = config.get("gen_sparse_edges",True)
+    train_edge_features = config.get("train_edge_features",False)
+    # latex_set = config.get("latex_set","OleehyO")
+    # vocab_type = config.get("vocab_type","concat")
+    # shuffle = config.get("shuffle",False)
+    # debug = config.get("debug",False)
+    # xml_name = config.get("xml_name", "debug")
+    # force_reload = config.get("force_reload", True)
+    # epochs = config.get("num_epochs",200)
+    # max_num_nodes = config.get("max_num_nodes",40)
+    # # sample_edges = config.get("sample_edges","sparse")
+    # mn_type = config.get("mn_type","embed")
 
-    # load model
-    encoder = GraphEncoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    decoder = GraphDecoder(in_channels,hidden_channels,out_channels,layers,layer_type)
-    model = GraphVAE(encoder, decoder, embedding_dim, dataset.vocab_size, sclae_grad_by_freq)
+    if isinstance(layer_type, str):
+        layer_type = load_class_from_string(pyg_nn, layer_type)
+
+    # Build method dict
+    if method is None:
+        embed = config.get("embed_method","onehot")
+
+        if embed == "freq_embed":
+            embed = "embed"
+            scale_grad_by_freq = True
+        
+        method = {
+            "onehot":{},
+            "embed":{},
+            "linear":{},
+            "loss": "cross_entropy" if embed == "onehot" else "cosine",
+            # "loss": "cross_entropy" if embed == "onehot" else config.get("loss","cosine"),
+            "scale": "log",
+        }
+        # for component in ["tag","concat","combined","mn","mi","mo","mtext","split","pos",]:
+        # for component in ["combined","tag","pos"]:
+        for component in ["tag","concat","pos","combined","split"]:
+            dim = config.get(f"{component}_dim",None)
+            if dim is not None:
+                if component == "split":
+                    method[embed].update({
+                        "mi":dim,
+                        "mo":dim,
+                        "mtext":dim,
+                        "mn":dim
+                    })
+                    # if mn_type == "linear":
+                    #     method["linear"] = {"mn":dim}
+                    # else:
+                    #     method["embed"] = {"mn":dim}
+                else:
+                    method[embed].update({component:dim})
+
+    else:
+        for embed_method in ["onehot","embed","linear"]:
+            od_embed = {}
+            # for component in ["tag","mn","mi","mo","mtext","concat","combined","pos"]:
+            # for component in ["tag","mi","mo","mtext","mn","concat","combined","pos"]:
+            for component in ["combined","tag","pos"]:
+                dim = method[embed_method].get(component,None)
+                if dim is not None:
+                    od_embed[component] = dim
+
+            method[embed_method] = od_embed
+
+    print("The embedding method is: ",method)
+    # print("Loading dataset...")
+
+    # load and setup dataset
+    # load and setup dataset
+       
+
+    # _, _, test = dataset.split(shuffle=shuffle)
+    # test_loader = DataLoader(test, batch_size=256, shuffle=False, num_workers=8)
+
+    # print(f"MathML dataset size: {len(mathml)} equations")
+    # print(f"Dataset sizes: test= {len(test)} graphs. Max number of nodes per graph= {max_num_nodes}")
+
+    # load models
+    embedding_dim = sum(method["onehot"].values()) + sum(method["embed"].values()) + sum(method["linear"].values())
+    
+
+    encoder = GraphEncoder(embedding_dim,hidden_channels,out_channels,layers,layer_type,batch_norm)
+    decoder = GraphDecoder(embedding_dim,hidden_channels,out_channels,layers,layer_type, edge_dim=1,batch_norm=batch_norm)
+    model = GraphVAE(encoder, decoder, vocab.shape(), method, scale_grad_by_freq, sparse_edges, train_edge_features)
 
     # decoder = Decoder(encoder.embedding.weight.data)
 
     # Load model and weights
     # model = pyg_nn.VGAE(encoder) if config.get("variational",False) else pyg_nn.GAE(encoder)
-    model_state_data = torch.load(model_path)
-    model.load_state_dict(model_state_data["model_state"])
+    # model_state_data = torch.load(model_path)
+    # model.load_state_dict(model_state_data["model_state"])
+    # Load model weights
+    try:
+        model_state_data = torch.load(model_path)
+        model.load_state_dict(model_state_data["model_state"])
+    except KeyError:
+        print(f"Error: 'model_state' not found in checkpoint {model_path}")
+        return {}, model
+    except RuntimeError as e:
+        print(f"Error loading model state dict: {e}")
+        return {}, model
+    
     model.to(device)
 
+    print("Starting testing...")
+    loss, auc, ap, acc, sim = validate(model,test_loader,device,config)
+
+    metrics = {"loss": loss, "auc": auc, "ap": ap, "acc": acc, "sim": sim}
+    print(metrics)
+    return metrics, model
+
+    # node_acc, edge_acc = reconstruct_graph(model,test_loader,device)
+    # print("Node accuracy: ", node_acc)
+    # print("Edge accuracy: ", edge_acc)
 
     # Evaluate on the test set
     # avg_val_loss, avg_auc, avg_ap = validate(
@@ -116,19 +379,59 @@ def test_model(config:dict, model_path:str):
 
     # Visualise things
     # visualise_bottleneck(model,test_data, device)
-    new_nodes, edges, old_nodes = reconstruct_graph(model,test_loader,device, in_channels)
-    new_graph = build_recon_graph(new_nodes, edges)
-    old_graph = build_recon_graph(old_nodes,edges)
+    # new_nodes, edges, old_nodes = reconstruct_graph(model,test_loader,device)
+    # new_graph = build_recon_graph(new_nodes, edges, vocab)
+    # old_graph = build_recon_graph(old_nodes, edges, vocab)
 
-    # original equation
-    xml_root = graph_to_xml(old_graph)
-    tree = ET.ElementTree(xml_root)
-    tree.write("out/encoded_equation.xml", encoding="utf-8", xml_declaration=True)
+    # # original equation
+    # xml_root = graph_to_xml(old_graph)
+    # tree = ET.ElementTree(xml_root)
+    # tree.write("out/encoded_equation.xml", encoding="utf-8", xml_declaration=True)
 
-    # decoded equation
-    xml_root = graph_to_xml(new_graph)
-    tree = ET.ElementTree(xml_root)
-    tree.write("out/decoded_equation.xml", encoding="utf-8", xml_declaration=True)
+    # # decoded equation
+    # xml_root = graph_to_xml(new_graph)
+    # tree = ET.ElementTree(xml_root)
+    # tree.write("out/decoded_equation.xml", encoding="utf-8", xml_declaration=True)
+
+def reconstruct(model:GraphVAE,data_loader,device,config, max_num_batches = 50): 
+    model.eval()
+
+    # Getting params
+    train_edge_features = config.get("train_edge_features",False)
+
+    latent_z = []
+    recon_g = []
+
+    with torch.no_grad():
+        for i,batch in enumerate(data_loader):
+            if i >= max_num_batches:
+                break
+
+            batch = batch.to(device)
+            edge_weight = batch.edge_attr.to(device) if train_edge_features else None
+            
+            # Encode
+            x = model.embed_x(batch.x,batch.tag,batch.pos,batch.nums).to(device)          
+            z = model.encode(x, batch.edge_index,edge_weight)
+
+            graph_embedding = pyg_nn.global_mean_pool(z, batch.batch)
+
+            # Decode
+            x_recon, edge_index_recon, e_recon = model.decode_all(z, batch.edge_index)
+            recon_data, raw_data = model.reverse_embed_x(x_recon)
+
+            latent_z.append(graph_embedding.cpu().detach().numpy())
+            recon_g.append({
+                "x":            x_recon.cpu().detach().numpy(),
+                "edge_index":   edge_index_recon.cpu().detach().numpy(),
+                "e_recon":      None if e_recon is None else e_recon.cpu().detach().numpy(),
+                "x_data":       recon_data,
+                "raw_x_data":   raw_data
+            })
+
+    return np.concatenate(latent_z, axis=0), recon_g
+
+
 
 def generate_all_possible_edges(num_nodes):
     """Generate all possible edges for a graph with num_nodes nodes."""
@@ -178,26 +481,34 @@ def graph_to_xml(G):
 
 
 
-def build_recon_graph(nodes, edges):
+def build_recon_graph(nodes, edges, vocab):
     new_graph = nx.Graph()
 
     # Get vocab
-    vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling","out/vocab_texts_katex.json")
-    with open(vocab_path,"r") as f:
-        vocab = json.load(f)
+    # vocab_path = os.path.join("/data/nsam947/Freshwater-Modelling","out/vocab_texts_katex.json")
+    # with open(vocab_path,"r") as f:
+    #     vocab = json.load(f)
 
-    vocab_texts = list(vocab.keys())
+    vocab_texts = list(vocab.vocab_table.keys())
     
     # Add nodes with features
     for i, features in enumerate(nodes):
-        one_hot = features[:-1]
-        mathml_index = np.flatnonzero(one_hot)[0]
-        tag = MATHML_TAGS[mathml_index]
+        tag_text = vocab_texts[features]
 
-        text = ""
-        if tag in ["mi","mo","mtext","mn"]:
-            vocab_index = features[-1]
-            text = vocab_texts[vocab_index]
+        tag, text = "", ""
+        if "_" in tag_text:
+            tag, text = tag_text.split("_")
+        else:
+            tag = tag_text
+
+        # one_hot = features[:-1]
+        # mathml_index = np.flatnonzero(one_hot)[0]
+        # tag = MATHML_TAGS[mathml_index]
+
+        # text = ""
+        # if tag in ["mi","mo","mtext","mn"]:
+        #     vocab_index = features[-1]
+        #     text = vocab_texts[vocab_index]
         
 
         new_graph.add_node(i, tag=tag, text=text)
@@ -208,44 +519,56 @@ def build_recon_graph(nodes, edges):
 
     return new_graph
 
-def reconstruct_graph(model:GraphVAE, test_loader, device, in_channels):
+def reconstruct_graph(model:GraphVAE, test_loader, device):
     model.eval()
 
     equation_index = 420
+    tot_node_accuracy = 0
+    tot_edge_accuracy = 0
+
     with torch.no_grad():
         for i,batch in enumerate(test_loader):
-            if i == equation_index:                
-                graph = batch.to(device)
-                edge_index = graph.edge_index
+            # if i == equation_index:                
+            batch = batch.to(device)
+            edge_index = batch.edge_index.to(device)
 
-                # Encodeing part
-                x = model.embed_x(graph.x)
-                z = model.encode(x,edge_index)
+            # Encodeing part
+            x = model.embed_x(batch.x,batch.tag_index,batch.pos,batch.nums).to(device)         
+            z = model.encode(x, batch.edge_index, batch.edge_attr)
 
-                # Decoding part
-                # edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
-                x_recon, e_recon = model.decode_all(z,edge_index,sigmoid=True)
+            accuracy = model.calculate_accuracy(z,x,batch.edge_index,batch.edge_attr)
 
-                # print("Input graph nodes: ",graph.x, graph.x.shape)
-                # print("Input graph edges: ",edge_index, edge_index.shape)
-                # print("Latent space ",z, z.shape)
-                # print("Output graph nodes: ",x_recon, x_recon.shape)
-                # print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
+            tot_node_accuracy += accuracy[0]
+            tot_edge_accuracy += accuracy[1]
+                # print("accuracy: ", accuracy)
+
+                # # Decoding part
+                # # edge_index = generate_all_possible_edges(graph.num_nodes).to(device)
+                # x_recon, e_recon, ef_recon = model.decode_all(z,edge_index,sigmoid=True)
+
+                # # print("Input graph nodes: ",graph.x, graph.x.shape)
+                # # print("Input graph edges: ",edge_index, edge_index.shape)
+                # # print("Latent space ",z, z.shape)
+                # # print("Output graph nodes: ",x_recon, x_recon.shape)
+                # # print("Output graph edges: ", e_recon, e_recon.shape, torch.count_nonzero(e_recon))
 
 
-                x_recon = x_recon.cpu().numpy()
-                e_recon = e_recon.cpu().numpy()
+                # x_recon = x_recon.cpu().numpy()
+                # e_recon = e_recon.cpu().numpy()
                 
 
-                filtered_edge_index = edge_index[:, e_recon == 1]
+                # filtered_edge_index = edge_index[:, e_recon == 1]
 
-                edge_tuples = [(int(filtered_edge_index[0, i]), int(filtered_edge_index[1, i])) for i in range(filtered_edge_index.shape[1])]
+                # edge_tuples = [(int(filtered_edge_index[0, i]), int(filtered_edge_index[1, i])) for i in range(filtered_edge_index.shape[1])]
 
 
 
-                return x_recon, edge_tuples, graph.x.cpu().numpy()   
+                # return x_recon, edge_tuples, batch.x.cpu().numpy()   
 
-            
+        node_accuracy = tot_node_accuracy / len(test_loader)
+        edge_accuracy = tot_edge_accuracy / len(test_loader)
+
+        return node_accuracy, edge_accuracy
 
             # print("New py_graph: ", new_pyg)
             # print("New graph: ", new_graph)
@@ -325,11 +648,11 @@ def plot_embeddings(embeddings, labels, title="Embeddings Visualization", save_d
     fig.write_image(save_dir)
 
 def apply_tsne(embeddings):
-    tsne = TSNE(n_components=2, random_state=42) #, learning_rate='auto', init='pca', perplexity=30)
+    tsne = TSNE(n_components=2, perplexity=30, n_iter=3000,random_state=42) #, learning_rate='auto', init='pca', perplexity=30)
     return tsne.fit_transform(embeddings)
 
 def apply_pca(embeddings):
-    pca = PCA(n_components=2)
+    pca = PCA(n_components=2,random_state=42)
     return pca.fit_transform(embeddings)
 
 def apply_tsne_with_pca(embeddings, pca_components=50):

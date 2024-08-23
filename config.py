@@ -2,6 +2,9 @@
 from torch_geometric.nn import GraphSAGE, GCNConv, GraphConv
 
 
+
+ROOT_DIR = "/data/nsam947/Freshwater-Modelling/"
+
 CONFIG = {
     "lr": 1e-3,
     "num_epochs":1,
@@ -10,15 +13,29 @@ CONFIG = {
     "num_layers":4,
     "out_channels":32,
     "hidden_channels":64,
-    "embedding_dims":200,
-    "scale_grad_by_freq":True,
-    "sample_edges":"sparse",
-    "variational":False,
+    "scale_grad_by_freq":False,
+    "variational":True,
     "batch_norm":False,
     "force_undirected":True,
     "alpha":1,
-    "beta":0,
-    "gamma":0,
+    "beta":1,
+    "gamma":1,
+    # "method":{
+    #     "onehot": {},
+    #     "embed": {"concat": 256},
+    #     "linear": {},
+    #     "scale": "log",
+    #     "loss":"mse"
+    # },
+    "shuffle": False,
+    "max_num_nodes": 100,
+    "latex_set":"OleehyO",
+    "vocab_type":"concat",
+    "xml_name":"default",
+    "force_reload": False,
+    "sample_edges":"sparse",
+    "gen_sparse_edges": True,
+    "train_edge_features": False,
 }
 
 MATHML_TAGS = [
