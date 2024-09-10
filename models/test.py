@@ -87,12 +87,13 @@ def main(model_name="default", sample_latex_set="sample", sample_xml_name="sampl
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('CUDA availability:', device)
     
-    sample, vocab = load_dataset(sample_xml_name, sample_latex_set, False, False, max_num_nodes, sample_vocab_type, False, False)
+    sample, vocab = load_dataset(sample_xml_name, sample_latex_set, debug=False, force_reload=True, max_num_nodes=max_num_nodes,vocab_type= sample_vocab_type, shuffle=False, split_set=False)
     sample_loader = DataLoader(sample, batch_size=256, shuffle=False, num_workers=8)
 
     metrics, model = test_model(config, model_path, sample_loader, vocab, device)
     sample_recon_z, sample_recon_g = reconstruct(model,sample_loader, device, config)
     print(metrics)
+    
 
     latent_space_file = os.path.join(dir_path, "latent_space.npy")
     if os.path.exists(latent_space_file):
@@ -110,24 +111,36 @@ def main(model_name="default", sample_latex_set="sample", sample_xml_name="sampl
     np.random.shuffle(test_recon_z)
     test_recon_z = test_recon_z[0:2000]
 
-    sample_indices = [0,1,4,8,9]
+    sample_indices = [0,1,2,3,4,5,6,9,10]
     sample_labels = [latex_eqs["train"][i] for i in sample_indices]
+
+    print(sample_recon_z[sample_indices][-1])
 
     # Prepare data for t-SNE
     all_embeddings = np.concatenate([test_recon_z, sample_recon_z[sample_indices]], axis=0)
-    test_labels = np.concatenate([np.zeros(len(test_recon_z)), np.array([1,2,3,4,5])])
+    test_labels = np.concatenate([np.zeros(len(test_recon_z)), np.array(sample_indices) + 1])
     
+    print("applying tsne and pca")
+    tesne_file = os.path.join(dir_path, "tsne.npy")
+    pca_file = os.path.join(dir_path, "pca.npy")
+    if os.path.exists(tesne_file):
+        tsne_results = np.load(tesne_file)
+        pca_resuts = np.load(pca_file)
+        print("loaded from numpy file")
+    else:
+        tsne_results = apply_tsne(all_embeddings)
+        pca_resuts = apply_pca(all_embeddings)
+        np.save(tesne_file, tsne_results)
+        np.save(pca_file, pca_resuts)
 
-    tsne_results = apply_tsne(all_embeddings)
-    pca_resuts = apply_pca(all_embeddings)
-
-    plot.plot_tsne_n_pca(tsne_results, pca_resuts, test_labels, sample_labels, model_name)
+    print("Plotting graph")
+    plot.plot_tsne_n_pca(tsne_results, pca_resuts, test_labels, sample_labels, model_name, sample_indices)
 
 
 
 def load_dataset(xml_name, latex_set, debug, force_reload, max_num_nodes, vocab_type, shuffle, split_set = True):
         print("Loading dataset...")
-        mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug,force_reload=False)
+        mathml = MathmlDataset(xml_name,latex_set=latex_set,debug=debug,force_reload=force_reload)
         vocab = VocabBuilder(xml_name,vocab_type=vocab_type, debug=debug, reload_vocab=False)
         dataset = GraphDataset(mathml.xml_dir,vocab, max_num_nodes= max_num_nodes, force_reload=force_reload, debug=debug)
 
@@ -648,7 +661,7 @@ def plot_embeddings(embeddings, labels, title="Embeddings Visualization", save_d
     fig.write_image(save_dir)
 
 def apply_tsne(embeddings):
-    tsne = TSNE(n_components=2, perplexity=30, n_iter=3000,random_state=42) #, learning_rate='auto', init='pca', perplexity=30)
+    tsne = TSNE(n_components=2, perplexity=30, n_iter=1000,random_state=42) #, learning_rate='auto', init='pca', perplexity=30)
     return tsne.fit_transform(embeddings)
 
 def apply_pca(embeddings):

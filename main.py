@@ -1,5 +1,7 @@
 
 import argparse
+import json
+import os
 import random
 
 import numpy as np
@@ -130,16 +132,23 @@ if __name__=="__main__":
         # }
         # plot.plot_training_history(metrics,"something")
 
-        in_path = "/data/nsam947/Freshwater-Modelling/data/ray_results/concat_search_var"
-        out_path = "/data/nsam947/Freshwater-Modelling/trained_models/concat_search_var"
-        # stats.extract_data_from_search(path)
-        # plot.plot_history_from_search("concat_search_var")
-        # plot.plot_study("ablation_study")
-        # plot.plot_boxplot_hyperparameters("hyperopt_LAST")
+        # in_path = "/data/nsam947/Freshwater-Modelling/data/ray_results/concat_search_var"
+        # out_path = "/data/nsam947/Freshwater-Modelling/trained_models/concat_search_var"
+        # # stats.extract_data_from_search(path)
+        # # plot.plot_history_from_search("concat_search_var")
+        # # plot.plot_study("ablation_study")
+        # # plot.plot_boxplot_hyperparameters("hyperopt_LAST")
 
-        # stats.create_combined_dataframe(in_path,out_path)
+        # # stats.create_combined_dataframe(in_path,out_path)
 
-        xml_path = "data/pre_processed/default/xml_elements.json"
-        # plot.plot_text_frequency_per_tag(xml_path)
-        plot.plot_numbers_distribution(xml_path,"num_val_distrib")
+        # xml_path = "data/pre_processed/default/xml_elements.json"
+        # # plot.plot_text_frequency_per_tag(xml_path)
+        # plot.plot_numbers_distribution(xml_path,"num_val_distrib")
         # stats.test_different_feature_scalings()
+        work_dir = "/data/nsam947/Freshwater-Modelling"
+
+        dir_path = os.path.join(work_dir,"trained_models/",model_name)
+
+        with open(os.path.join(dir_path,"history.json"),"r") as f:
+            history = json.load(f)
+        plot.plot_training_history(history, dir_path)

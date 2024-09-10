@@ -251,16 +251,24 @@ def plot_training_history(history, dir_path):
 
         num_epochs = len(val_data)
 
+        if metric == "acc":
+            metric_name = "accuracy"
+        else:
+            metric_name = metric
+
         plt.figure(figsize=(6, 4))
-        plt.plot(range(1, num_epochs + 1), train_data, label=f'Train {metric}', color='blue')
-        plt.plot(range(1, num_epochs + 1), val_data, label=f'Validation {metric}', color='orange')
+        plt.plot(range(1, num_epochs + 1), train_data, label=f'Train {metric_name}', color='blue')
+        plt.plot(range(1, num_epochs + 1), val_data, label=f'Validation {metric_name}', color='orange')
         plt.xlabel('Epoch')
-        plt.ylabel(metric)
-        plt.title(f'Train and Validation {metric}')
-        plt.legend()
+        plt.ylabel(metric_name)
+        if metric == "acc":
+            plt.ylim(0.875,1)
+        plt.title(f'Train and Validation {metric_name}')
+        plt.legend(loc="lower right")
         plt.tight_layout()
         plt.grid(True)
         plt.savefig(f'{dir_path}/{metric}_history.png')
+        plt.savefig(f'{dir_path}/{metric}_history.pdf')
 
     for metric in metrics:
         
@@ -285,6 +293,7 @@ def plot_loss_graph(val_losses,train_losses, dir_path):
     plt.title('Train and Validation Loss')
     plt.legend()
     plt.savefig(f'{dir_path}/loss_graph.png')
+    plt.savefig(f'{dir_path}/loss_graph.pdf')
 
 def plot_training_graphs(history,dir_path):
     train_losses, val_losses, aucs, aps = history["loss"], history["val_loss"], history["val_auc"], history["val_ap"]
@@ -323,6 +332,7 @@ def plot_training_graphs(history,dir_path):
 
     # Save the figure
     plt.savefig(f'{dir_path}/training_metrics.png')
+    plt.savefig(f'{dir_path}/training_metrics.pdf')
 
 def plot_multiple_distributions(arrays_dict={}):
     eps = 1e-10
@@ -622,6 +632,7 @@ def plot_history_from_search(model_name="concat_search_var"):
         plt.suptitle(f'History {metric} per {col_type} and {row_type}', fontsize=14)
         plt.tight_layout()  # Adjust layout to fit suptitle
         plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.png')
+        plt.savefig(f'trained_models/{model_name}/history_{metric}_per_{col_type}_and_{row_type}.pdf')
 
     for metric in metrics_to_watch:
         plot_metric_graph(metric)
@@ -876,13 +887,13 @@ def plot_study(model_name):
     plt.savefig(f'trained_models/{model_name}/loss_acc_sim{version}.pdf')
 
 
-def plot_tsne_n_pca(tsne_results, pca_results, test_labels, sample_labels, model_name):
+def plot_tsne_n_pca(tsne_results, pca_results, test_labels, sample_labels, model_name, sample_indices):
     # Plot t-SNE results
     # plt.figure(figsize=(6,6))
-    fig, axs = plt.subplots(1,2, figsize=(7.5,4.5))
+    fig, axs = plt.subplots(1,2, figsize=(7,5))
 
-    markers = ['o', 'v','^','s','<','p']
-    colors = ['tab:blue', 'tab:orange', 'limegreen','tab:red', 'yellow','magenta']
+    markers = ['o', 'v','^','>','<','s','p','o','<','o','p','^']
+    colors = ['lightgray',  'tab:orange','chocolate', 'tab:green', 'forestgreen','tab:red','salmon','magenta','navy','darkviolet']
 
     embeddings = [tsne_results,pca_results]
     # offsets = np.random.rand(3)
@@ -894,31 +905,45 @@ def plot_tsne_n_pca(tsne_results, pca_results, test_labels, sample_labels, model
         cleaned_labels.append(eq_label)
     print(cleaned_labels)
 
+    samples = []
+
     for i in range(2):
         ax = axs[i]
         # Plot test set
-        handle_test = ax.scatter(embeddings[i][test_labels == 0, 0], embeddings[i][test_labels == 0, 1], label='Test Set', alpha=0.3, s=15, marker=markers[0], color=colors[0])
+        handle_test = ax.scatter(embeddings[i][test_labels == 0, 0], embeddings[i][test_labels == 0, 1], label='Test Set', alpha=0.55, s=15, marker=markers[0], color=colors[0])
 
         # print(len(embeddings[i]),len(cleaned_labels), len(markers))
         # Plot sample set
-        handle_sample1 = ax.scatter(embeddings[i][test_labels == 1, 0], embeddings[i][test_labels == 1, 1], label=cleaned_labels[0], alpha=1, s=60, marker=markers[1], color=colors[1])
-        handle_sample2 = ax.scatter(embeddings[i][test_labels == 2, 0], embeddings[i][test_labels == 2, 1], label=cleaned_labels[1], alpha=1, s=40, marker=markers[2], color=colors[2])
-        handle_sample3 = ax.scatter(embeddings[i][test_labels == 3, 0], embeddings[i][test_labels == 3, 1], label=cleaned_labels[2], alpha=1, s=40, marker=markers[3], color=colors[3])
-        handle_sample4 = ax.scatter(embeddings[i][test_labels == 4, 0], embeddings[i][test_labels == 4, 1], label=cleaned_labels[3], alpha=1, s=40, marker=markers[4], color=colors[4])
-        handle_sample5 = ax.scatter(embeddings[i][test_labels == 5, 0], embeddings[i][test_labels == 5, 1], label=cleaned_labels[4], alpha=1, s=40, marker=markers[5], color=colors[5])
+        print(len(embeddings[i]), len(cleaned_labels))
+        for a, b in enumerate(sample_indices):
+            if a >3:
+                continue
+            # a = j #+ 1
+            a+=1
+            b+=1
+            # print(a)
+            handle_sample1 = ax.scatter(embeddings[i][test_labels == b, 0], embeddings[i][test_labels == b, 1], label=cleaned_labels[a-1], alpha=1, s=60, marker=markers[a], color=colors[a])
+            print(embeddings[i][test_labels == b])
+            if i == 0:
+                samples.append(handle_sample1)
+        # handle_sample2 = ax.scatter(embeddings[i][test_labels == 2, 0], embeddings[i][test_labels == 2, 1], label=cleaned_labels[1], alpha=1, s=40, marker=markers[2], color=colors[2])
+        # handle_sample3 = ax.scatter(embeddings[i][test_labels == 3, 0], embeddings[i][test_labels == 3, 1], label=cleaned_labels[2], alpha=1, s=40, marker=markers[3], color=colors[3])
+        # handle_sample4 = ax.scatter(embeddings[i][test_labels == 4, 0], embeddings[i][test_labels == 4, 1], label=cleaned_labels[3], alpha=1, s=40, marker=markers[4], color=colors[4])
+        # handle_sample5 = ax.scatter(embeddings[i][test_labels == 5, 0], embeddings[i][test_labels == 5, 1], label=cleaned_labels[4], alpha=1, s=40, marker=markers[5], color=colors[5])
 
         graph = "t-SNE" if i == 0 else "PCA"
         ax.set_title(f'{graph} of Graph Latent Representations')
         # ax.grid(True)
 
     # Create legend
-    handles = [handle_test, handle_sample1, handle_sample2, handle_sample3,handle_sample4,handle_sample5]
+    # handles = [handle_test, handle_sample1, handle_sample2, handle_sample3,handle_sample4,handle_sample5]
+    handles = [handle_test].extend(samples)
     labels = ['Test Set'] + cleaned_labels
 
     fig.legend(handles=handles, labels=labels, loc='lower center', ncol=2)
 
     # fig.legend(loc='lower center')
-    plt.tight_layout(rect=[0,0.25, 1, 1])
+    plt.tight_layout(rect=[0,0.28, 1, 1])
 
-    plt.savefig(f'trained_models/{model_name}/tsne_pca.png')
-    plt.savefig(f'trained_models/{model_name}/tsne_pca.pdf')
+    plt.savefig(f'trained_models/{model_name}/tsne_pca_full.png')
+    plt.savefig(f'trained_models/{model_name}/tsne_pca_full.pdf')
